@@ -66,10 +66,10 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     /// この権限が何に使われるか。ユーザーに見せる説明で、Info.plist の用途文字列と揃える。
     public var purpose: String {
         switch self {
-        case .camera: return "サボり検知時に証拠写真を1枚撮る"
+        case .camera: return "サボり検知時に証拠写真を 1 枚撮ります"
         case .screenRecording: return "デバッグ画面から Mac のスクリーンショットを撮るときだけ使います"
-        case .automation: return "説教中に再生中の音楽を止める"
-        case .motion: return "AirPods の首振りを はい/いいえ として受け取る"
+        case .automation: return "説教中に再生中の音楽を止めます"
+        case .motion: return "AirPods の首振りを はい/いいえ として受け取ります"
         }
     }
 
@@ -104,10 +104,10 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     /// 権限が下りていないときに、その権限に依存する機能がどう壊れるか。
     public var consequenceIfDenied: String {
         switch self {
-        case .camera: return "居眠りの証拠写真が撮れない"
-        case .screenRecording: return "Mac の画面を晒せない"
-        case .automation: return "音楽を止められない(オーバーレイは出る)"
-        case .motion: return "首振りで答えられない"
+        case .camera: return "居眠りの証拠写真が撮れません"
+        case .screenRecording: return "Mac の画面を晒せません"
+        case .automation: return "音楽を止められません(オーバーレイは出ます)"
+        case .motion: return "首振りで答えられません"
         }
     }
 }

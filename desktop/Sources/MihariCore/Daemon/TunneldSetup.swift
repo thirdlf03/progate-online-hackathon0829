@@ -103,7 +103,7 @@ public final class TunneldModel: ObservableObject {
             bridge = try locator.bridgeDirectory()
         } catch {
             status = .notRunning
-            message = "bridge/ が見つからない。DEVICE_BRIDGE_DIR を設定する"
+            message = "bridge/ が見つかりません。DEVICE_BRIDGE_DIR を設定してください"
             return
         }
 
@@ -117,13 +117,16 @@ public final class TunneldModel: ObservableObject {
             try? await Task.sleep(for: settleDelay)
             status = .unknown
             await refresh()
-            message = status == .running ? "登録した。以後は再起動しても自動で立ち上がる" : "登録は完了したが、まだ応答がない。数秒待って再確認する"
+            message =
+                status == .running
+                ? "登録しました。以後は再起動しても自動で立ち上がります"
+                : "登録は完了しましたが、まだ応答がありません。数秒待って再確認してください"
         } else if outcome.errorNumber == -128 {
             status = .notRunning
-            message = "キャンセルされた"
+            message = "キャンセルされました"
         } else {
             status = .notRunning
-            message = "登録に失敗した(エラー \(outcome.errorNumber.map(String.init) ?? "不明"))"
+            message = "登録に失敗しました(エラー \(outcome.errorNumber.map(String.init) ?? "不明"))"
         }
     }
 
@@ -142,7 +145,7 @@ public final class TunneldModel: ObservableObject {
             bridge = try locator.bridgeDirectory()
         } catch {
             status = previous
-            message = "bridge/ が見つからない。DEVICE_BRIDGE_DIR を設定する"
+            message = "bridge/ が見つかりません。DEVICE_BRIDGE_DIR を設定してください"
             return
         }
 
@@ -158,14 +161,14 @@ public final class TunneldModel: ObservableObject {
             await refresh()
             message =
                 status == .running
-                ? "解除したが、まだ応答がある。数秒待って再確認する"
-                : "解除した。以後は再起動しても自動で立ち上がらない"
+                ? "解除しましたが、まだ応答があります。数秒待って再確認してください"
+                : "解除しました。以後は再起動しても自動で立ち上がりません"
         } else if outcome.errorNumber == -128 {
             status = previous
-            message = "キャンセルされた"
+            message = "キャンセルされました"
         } else {
             status = previous
-            message = "解除に失敗した(エラー \(outcome.errorNumber.map(String.init) ?? "不明"))"
+            message = "解除に失敗しました(エラー \(outcome.errorNumber.map(String.init) ?? "不明"))"
         }
     }
 }

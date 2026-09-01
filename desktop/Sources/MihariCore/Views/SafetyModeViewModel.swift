@@ -14,12 +14,19 @@ public enum SafetyModeViewModel {
 
     /// `SafetyDecision` から「状態行」に出す 1 行の文言を決める。
     ///
+    /// 断るときは「できない」で終わらせず、次に何をすればできるようになるかまで書く。
+    ///
+    /// - Parameter lockedUntil: 終了ロックの解除時刻。ロック中でなければ `nil`。
+    ///   `quitLockWhileWatching` の文言に「いつ OFF にできるようになるか」を添えるために使う。
     /// - Returns: 表示すべき文言。何も出さないときは `nil`。
     ///
     /// - Note: `.schedule` は予約帯を出して結果を示すため、状態行には何も書かない。
     ///   `.apply` は `skipped`(監視中の `disableAll` で残した `quitLock` など)が
     ///   あるときだけ、その旨を伝える。
-    public static func statusMessage(for decision: SafetyDecision) -> String? {
+    public static func statusMessage(
+        for decision: SafetyDecision,
+        lockedUntil: Date? = nil
+    ) -> String? {
         switch decision {
         case .apply(_, let skipped):
             // 監視中に「全部 OFF」を頼むと quitLock だけ残る。残したことを明かさないと
@@ -33,13 +40,54 @@ public enum SafetyModeViewModel {
         case .reject(let reason):
             switch reason {
             case .enablingWhileWatching:
-                return "監視中は ON にできません"
+                return "監視中は ON にできません。監視を止めると ON にできます(右クリック →「監視を止める」)"
             case .quitLockWhileWatching:
-                return "監視中は OFF にできません"
+                let unlock = lockedUntil.map { "ロック解除(\(clockText($0)))" } ?? "ロック解除"
+                return "\(unlock)まで OFF にできません。どうしても終了したい場合は右クリック →「どうしても終了する」"
             case .dependencyMissing:
                 return "「iPhone を見張る」を先に ON にしてください"
             }
         }
+    }
+
+    /// 時刻だけの表示文字列。`HH:mm` の形にする。ロック解除時刻に使う。
+    public static func clockText(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle()
+                .hour(.twoDigits(amPM: .omitted))
+                .minute(.twoDigits)
+        )
+    }
+
+    /// カードの Toggle の左に出す「変更できない理由」。
+    ///
+    /// 監視中なら止めれば変えられることを、監視は止まっていてロックだけが残っているなら
+    /// いつまで待てばよいかを書く。どちらでもなければ何も出さない。
+    public static func cardRestrictionNote(isWatching: Bool, lockedUntil: Date?) -> String? {
+        if isWatching {
+            return "監視を止めると変更できます"
+        }
+        guard let lockedUntil else { return nil }
+        return lockOnlyNote(lockedUntil: lockedUntil)
+    }
+
+    /// 設定画面のフッターに出す「変更できない理由」。
+    ///
+    /// カード側と違い、画面全体に効く制限として書く。
+    public static func footerRestrictionNote(isWatching: Bool, lockedUntil: Date?) -> String? {
+        if isWatching {
+            return "監視中: ON にする変更はできません"
+        }
+        guard let lockedUntil else { return nil }
+        return lockOnlyNote(lockedUntil: lockedUntil)
+    }
+
+    /// 監視は止まっているのにロックだけが残っている状態の 1 行。
+    ///
+    /// この状態を「監視中」と書くと、監視を止めたのに監視中と言われて混乱するため、
+    /// ロックが理由であることと解除時刻をそのまま出す(#52)。
+    private static func lockOnlyNote(lockedUntil: Date) -> String {
+        "ロック中(\(clockText(lockedUntil)) まで): 設定を緩められません"
     }
 
     /// 予約の発効時刻の表示文字列。`Date.FormatStyle` で `M/d HH:mm` の形にする。
@@ -104,7 +152,7 @@ public enum SafetyModeViewModel {
     public static func modeSubtitle(for mode: SafetyMode) -> String {
         switch mode {
         case .safety:
-            return "撮らない・晒さない・縛らない。ペットが浮くだけ。"
+            return "撮らない・晒さない・縛らない。サボると吹き出しと声で注意するだけ。"
         case .custom(let enabledCount):
             return "\(enabledCount) 個の機能を許しています。"
         case .unlimited:
@@ -158,14 +206,100 @@ public enum SafetyModeViewModel {
     }
 
     /// カードの注意帯の文言。対象は iphoneScreenshot と quitLock の 2 本だけ。
+    ///
+    /// 要約(`SafetyFeature.summary`)と同じことを繰り返さず、要約に書いていない
+    /// 「外に出る」「戻せなくなる」だけをここに書く。
     public static func notice(for feature: SafetyFeature) -> String? {
         switch feature {
         case .iphoneScreenshot:
-            return "画面の内容は Google Gemini に送られて読み取られます"
+            return "画面の中身が外部(Google Gemini)に送られます"
         case .quitLock:
-            return "起動した瞬間から、決めた時間(既定 4 時間)は終了できません"
+            return "ON にした瞬間からロックされます(解除まで OFF にできません)"
         default:
             return nil
         }
+    }
+
+    // MARK: - カードの権限行
+
+    /// カードの「権限」行に出すもの。
+    ///
+    /// トグルが OFF のうちは「何が要るか」の静的な案内でよいが、ON にしたあとは
+    /// 「いま許可が下りているか」を出さないと、拒否・キャンセルされたことに気づけない。
+    public enum PermissionRowState: Equatable, Sendable {
+        /// 静的な案内(トグル OFF、または権限が要らない機能)。
+        case staticNote(String)
+        /// 許可済み / 登録済み。
+        case satisfied(String)
+        /// 未許可 / 未登録。押せば先に進めるボタンを添える。
+        case missing(text: String, actionTitle: String, action: PermissionRowAction)
+        /// 確認中・登録中で、まだどちらとも言えない。
+        case working(String)
+    }
+
+    /// 権限行のボタンが何をするか。
+    public enum PermissionRowAction: Equatable, Sendable {
+        /// システム設定の該当ペインを開く(TCC は一度断られるとアプリから再要求できない)。
+        case openSystemSettings
+        /// tunneld の LaunchDaemon を登録する(管理者パスワード)。
+        case installTunneld
+    }
+
+    /// tunneld の状態を権限行の 3 段階に均したもの。
+    public enum TunneldReadiness: Equatable, Sendable {
+        case ready
+        case missing
+        case working
+    }
+
+    /// `TunneldModel.Status` を権限行の 3 段階に均す。
+    public static func readiness(of status: TunneldModel.Status) -> TunneldReadiness {
+        switch status {
+        case .running: return .ready
+        case .notRunning: return .missing
+        case .unknown, .checking, .installing: return .working
+        }
+    }
+
+    /// カードの「権限」行を決める。
+    ///
+    /// - Parameters:
+    ///   - isEnabled: そのトグルが ON か。OFF なら静的な案内に留める。
+    ///   - kind: この機能が要求する TCC 権限。要らない機能では `nil`。
+    ///   - grant: `kind` の現在の状態。`kind` が `nil` のときは無視する。
+    ///   - tunneld: tunneld の状態。tunneld が要らない機能では `nil`。
+    public static func permissionRow(
+        for feature: SafetyFeature,
+        isEnabled: Bool,
+        kind: PermissionKind?,
+        grant: PermissionGrant?,
+        tunneld: TunneldReadiness?
+    ) -> PermissionRowState {
+        guard isEnabled else { return .staticNote(feature.permissionNote) }
+
+        if let tunneld {
+            switch tunneld {
+            case .ready:
+                return .satisfied("tunneld: 登録済み")
+            case .missing:
+                return .missing(
+                    text: "tunneld: 未登録 — 登録されるまで iPhone の画面は撮れません",
+                    actionTitle: "登録する…",
+                    action: .installTunneld
+                )
+            case .working:
+                return .working("tunneld: 確認中…")
+            }
+        }
+
+        guard let kind, let grant else { return .staticNote(feature.permissionNote) }
+        if grant == .granted {
+            return .satisfied("\(kind.title): 許可済み")
+        }
+        return .missing(
+            text: "\(kind.title): 未許可 — 許可されるまでこの機能は動きません",
+            actionTitle: "システム設定を開く",
+            action: .openSystemSettings
+        )
     }
 }

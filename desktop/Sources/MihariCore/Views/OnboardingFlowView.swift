@@ -50,8 +50,16 @@ public struct OnboardingFlowView: View {
             case .mode:
                 SafetyModeView(
                     safety: safety,
+                    permissions: permissions,
+                    tunneld: tunneld,
                     isWatching: false,
-                    context: .onboarding(onNext: goToPermissionsStep),
+                    // オンボーディングの時点ではまだ見張り始めていないので、ロックも無い。
+                    lockedUntil: nil,
+                    context: .onboarding(
+                        caption: footerCaption,
+                        nextTitle: nextTitle,
+                        onNext: goToPermissionsStep
+                    ),
                     onFeatureEnabled: { feature in
                         Task { await enableFeature(feature) }
                     },
@@ -74,17 +82,42 @@ public struct OnboardingFlowView: View {
         }
     }
 
-    /// ステップ 2(権限画面)。見せるものが無ければステップ 1 の「次へ」で
+    /// ステップ 1 のフッターのキャプション。
+    ///
+    /// 権限ステップを飛ばせるなら「押したらもう始まる」こと、飛ばせないなら
+    /// 「次に何を確認されるのか」を書く。ボタンの文言と食い違わせない。
+    private var footerCaption: String {
+        shouldSkipPermissionsStep
+            ? "全部 OFF なら権限は不要です。「この設定で始める」で今すぐ見張り始めます。"
+            : "ON にした機能に必要な権限を次の画面で確認します。"
+    }
+
+    /// ステップ 1 のボタンの文言。
+    ///
+    /// 権限ステップを飛ばせるなら、押した瞬間に監視が始まる。「次へ」だと次の画面が
+    /// 出ると思わせてしまうので、そこで終わることが分かる文言にする。
+    private var nextTitle: String {
+        shouldSkipPermissionsStep ? "この設定で始める" : "次へ(権限の確認)"
+    }
+
+    /// ステップ 2(権限画面)に見せるものが無いか。
+    ///
+    /// `permissions` は `onReceive` でトグルの変化を受け取っているので、body の再構成の
+    /// たびに最新の設定で判定できる。
+    private var shouldSkipPermissionsStep: Bool {
+        SafetyModeViewModel.shouldSkipPermissionsStep(
+            relevantKinds: permissions.relevantKinds,
+            isIPhoneScreenshotEnabled: safety.isEnabled(.iphoneScreenshot)
+        )
+    }
+
+    /// ステップ 2(権限画面)。見せるものが無ければステップ 1 のボタンで
     /// そのままオンボーディングを終える。
     private func goToPermissionsStep() {
         // 「次へ」を押した時点のトグルで判断する。`onReceive` が届く前でも、
         // 古い設定のまま権限画面を飛ばさないよう、ここでも必ず反映させる。
         permissions.apply(settings: safety.settings)
-        let shouldSkip = SafetyModeViewModel.shouldSkipPermissionsStep(
-            relevantKinds: permissions.relevantKinds,
-            isIPhoneScreenshotEnabled: safety.isEnabled(.iphoneScreenshot)
-        )
-        if shouldSkip {
+        if shouldSkipPermissionsStep {
             onStart()
         } else {
             step = .permissions

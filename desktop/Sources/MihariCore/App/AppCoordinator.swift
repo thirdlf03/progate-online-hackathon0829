@@ -570,13 +570,17 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     /// 執行猶予脱出の宣言ダイアログを開く。
     public func openEscapeDialog() {
+        // 選択肢とそれに添える実時刻は同じ時刻から作る。
+        let now = Date()
         let choices = EscapePolicy.returnDelayChoices(
-            now: Date(),
+            now: now,
             unlockAt: quitTimeLock.unlockAt
         )
         windows.showEscape {
             EscapeDialogView(
                 choices: choices,
+                now: now,
+                postsToDiscord: safety.isEnabled(.discordExposure),
                 onStart: { [weak self] delay in self?.startEscape(returnDelay: delay) },
                 onCancel: { [weak self] in self?.windows.closeEscape() }
             )
@@ -710,7 +714,10 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     }
 
     /// 検証用の 10 タブ画面が要求されているか。
-    private static var isDebugUIRequested: Bool {
+    ///
+    /// 開発者向けの注記(TCC・API 名)を出すかの判定にも使うので、同じモジュールの
+    /// View から読めるようにしてある。
+    static var isDebugUIRequested: Bool {
         ProcessInfo.processInfo.environment[debugUIEnvironmentKey] == "1"
     }
 
@@ -921,6 +928,15 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     /// 「監視中」の値を同じ判定で渡すために使う。
     fileprivate var isWatchingForSafety: Bool {
         isWatching || (hasBegun && !quitTimeLock.isUnlocked())
+    }
+
+    /// 終了ロックの解除時刻。ロック中でなければ nil。
+    ///
+    /// 設定画面に「監視中か」と「ロック中か」を分けて渡すために使う。監視を止めても
+    /// ロックが残っている状態を「監視中」と表示すると混乱させるため(#52)。
+    fileprivate var safetyLockUntil: Date? {
+        guard hasBegun, !quitTimeLock.isUnlocked() else { return nil }
+        return quitTimeLock.unlockAt
     }
 
     /// 保存されたスクショを見張り始める。すでに見張っていれば何も起きない。
@@ -1322,7 +1338,10 @@ private struct SafetySettingsHost: View {
     var body: some View {
         SafetyModeView(
             safety: safety,
-            isWatching: coordinator.isWatchingForSafety,
+            permissions: coordinator.permissions,
+            tunneld: coordinator.tunneld,
+            isWatching: coordinator.isWatching,
+            lockedUntil: coordinator.safetyLockUntil,
             context: .settings(onClose: { [weak coordinator] in
                 coordinator?.closeSafety()
             }),

@@ -19,20 +19,163 @@ struct SafetyModeViewModelTests {
         #expect(SafetyModeViewModel.toggleChange(for: .iphoneScreenshot, turningOn: true) == .enable(.iphoneScreenshot))
     }
 
-    @Test("拒否の理由が状態行の文言に変換される")
+    @Test("拒否の理由が、次にどうすればよいかまで書いた状態行の文言に変換される")
     func rejectionReasonsBecomeStatusMessages() {
         #expect(
             SafetyModeViewModel.statusMessage(for: .reject(.enablingWhileWatching))
-                == "監視中は ON にできません"
-        )
-        #expect(
-            SafetyModeViewModel.statusMessage(for: .reject(.quitLockWhileWatching))
-                == "監視中は OFF にできません"
+                == "監視中は ON にできません。監視を止めると ON にできます(右クリック →「監視を止める」)"
         )
         #expect(
             SafetyModeViewModel.statusMessage(for: .reject(.dependencyMissing(.iphonePresence)))
                 == "「iPhone を見張る」を先に ON にしてください"
         )
+    }
+
+    @Test("quitLock を OFF にできない理由には、渡せるならロック解除の時刻を添える")
+    func quitLockRejectionCarriesTheUnlockTime() throws {
+        let unlockAt = try makeDate()
+
+        #expect(
+            SafetyModeViewModel.statusMessage(
+                for: .reject(.quitLockWhileWatching),
+                lockedUntil: unlockAt
+            )
+                == "ロック解除(14:30)まで OFF にできません。どうしても終了したい場合は右クリック →「どうしても終了する」"
+        )
+        // 解除時刻が取れないときは時刻抜きで同じことを言う。
+        #expect(
+            SafetyModeViewModel.statusMessage(for: .reject(.quitLockWhileWatching))
+                == "ロック解除まで OFF にできません。どうしても終了したい場合は右クリック →「どうしても終了する」"
+        )
+    }
+
+    @Test("変更できない理由は、監視中とロックだけの状態を書き分ける")
+    func restrictionNotesSeparateWatchingFromTheLock() throws {
+        let unlockAt = try makeDate()
+
+        // 監視中なら、止めれば変えられることを言う。
+        #expect(
+            SafetyModeViewModel.cardRestrictionNote(isWatching: true, lockedUntil: nil)
+                == "監視を止めると変更できます"
+        )
+        #expect(
+            SafetyModeViewModel.footerRestrictionNote(isWatching: true, lockedUntil: nil)
+                == "監視中: ON にする変更はできません"
+        )
+
+        // 監視は止まっていてロックだけが残っているなら、「監視中」とは言わずに解除時刻を出す。
+        #expect(
+            SafetyModeViewModel.cardRestrictionNote(isWatching: false, lockedUntil: unlockAt)
+                == "ロック中(14:30 まで): 設定を緩められません"
+        )
+        #expect(
+            SafetyModeViewModel.footerRestrictionNote(isWatching: false, lockedUntil: unlockAt)
+                == "ロック中(14:30 まで): 設定を緩められません"
+        )
+
+        // どちらでもなければ何も出さない。
+        #expect(SafetyModeViewModel.cardRestrictionNote(isWatching: false, lockedUntil: nil) == nil)
+        #expect(SafetyModeViewModel.footerRestrictionNote(isWatching: false, lockedUntil: nil) == nil)
+    }
+
+    @Test("権限行は、トグルが OFF なら静的な案内、ON なら許可状態を出す")
+    func permissionRowShowsTheGrantOnlyWhileEnabled() {
+        // OFF のあいだは「何が要るか」だけ。まだ要求もしていない権限を未許可とは書かない。
+        #expect(
+            SafetyModeViewModel.permissionRow(
+                for: .macCamera,
+                isEnabled: false,
+                kind: .camera,
+                grant: .denied,
+                tunneld: nil
+            ) == .staticNote(SafetyFeature.macCamera.permissionNote)
+        )
+
+        #expect(
+            SafetyModeViewModel.permissionRow(
+                for: .macCamera,
+                isEnabled: true,
+                kind: .camera,
+                grant: .granted,
+                tunneld: nil
+            ) == .satisfied("カメラ: 許可済み")
+        )
+
+        // 拒否も未決定も、その機能が動かないことに変わりはないので同じ出し方にする。
+        for grant in [PermissionGrant.denied, .undetermined] {
+            #expect(
+                SafetyModeViewModel.permissionRow(
+                    for: .macCamera,
+                    isEnabled: true,
+                    kind: .camera,
+                    grant: grant,
+                    tunneld: nil
+                )
+                    == .missing(
+                        text: "カメラ: 未許可 — 許可されるまでこの機能は動きません",
+                        actionTitle: "システム設定を開く",
+                        action: .openSystemSettings
+                    )
+            )
+        }
+
+        // 権限の要らない機能は ON でも静的な案内のまま。
+        #expect(
+            SafetyModeViewModel.permissionRow(
+                for: .photobomb,
+                isEnabled: true,
+                kind: nil,
+                grant: nil,
+                tunneld: nil
+            ) == .staticNote(SafetyFeature.photobomb.permissionNote)
+        )
+    }
+
+    @Test("iPhone の画面を撮るの権限行は tunneld の常駐状態を出す")
+    func permissionRowFollowsTunneldForIPhoneScreenshot() {
+        #expect(
+            SafetyModeViewModel.permissionRow(
+                for: .iphoneScreenshot,
+                isEnabled: true,
+                kind: nil,
+                grant: nil,
+                tunneld: .ready
+            ) == .satisfied("tunneld: 登録済み")
+        )
+        #expect(
+            SafetyModeViewModel.permissionRow(
+                for: .iphoneScreenshot,
+                isEnabled: true,
+                kind: nil,
+                grant: nil,
+                tunneld: .missing
+            )
+                == .missing(
+                    text: "tunneld: 未登録 — 登録されるまで iPhone の画面は撮れません",
+                    actionTitle: "登録する…",
+                    action: .installTunneld
+                )
+        )
+        #expect(
+            SafetyModeViewModel.permissionRow(
+                for: .iphoneScreenshot,
+                isEnabled: true,
+                kind: nil,
+                grant: nil,
+                tunneld: .working
+            ) == .working("tunneld: 確認中…")
+        )
+    }
+
+    @MainActor
+    @Test("tunneld の状態は権限行の 3 段階に均される")
+    func tunneldStatusIsFlattenedIntoThreeSteps() {
+        #expect(SafetyModeViewModel.readiness(of: .running) == .ready)
+        #expect(SafetyModeViewModel.readiness(of: .notRunning) == .missing)
+        // まだ確かめていない・確認中・登録中は、どちらとも言えないので同じ扱い。
+        #expect(SafetyModeViewModel.readiness(of: .unknown) == .working)
+        #expect(SafetyModeViewModel.readiness(of: .checking) == .working)
+        #expect(SafetyModeViewModel.readiness(of: .installing) == .working)
     }
 
     @Test("apply はスキップされた機能があるときだけ状態行に文言を出す")

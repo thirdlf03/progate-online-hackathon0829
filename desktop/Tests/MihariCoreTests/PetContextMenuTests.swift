@@ -65,7 +65,7 @@ struct PetContextMenuTests {
         #expect(menu.items[1].isSeparatorItem)
     }
 
-    @Test("「設定…」は Discord 設定の直前に並ぶ")
+    @Test("「セーフティー設定…」は Discord 設定の直前に並ぶ")
     func settingsItemSitsRightBeforeDiscordSettings() throws {
         // 実機の表示設定をテスト同士で共有しないよう、実行のたびに空の UserDefaults を使う。
         let suiteName = "mihari.test.petContextMenu.\(UUID().uuidString)"
@@ -79,7 +79,7 @@ struct PetContextMenuTests {
         let titles = menu.items.map(\.title)
         let discordIndex = try #require(titles.firstIndex(of: "Discord 設定…"))
 
-        #expect(titles[discordIndex - 1] == "設定…")
+        #expect(titles[discordIndex - 1] == "セーフティー設定…")
     }
 
     @Test("自動での有効・無効判定に任せず、明示しなければ押せるままにする")

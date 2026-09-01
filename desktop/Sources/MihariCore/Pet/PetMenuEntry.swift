@@ -62,7 +62,7 @@ public enum PetMenuEntries {
             ),
             .separator,
             .item(
-                title: "設定…",
+                title: "セーフティー設定…",
                 action: { actions.openSafetySettings() }
             ),
             .item(

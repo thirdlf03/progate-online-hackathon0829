@@ -43,6 +43,26 @@ struct EscapePolicyTests {
         #expect(choices.last == EscapePolicy.maxReturnDelay)
     }
 
+    @Test("選択肢には戻る実時刻を添える")
+    func returnChoiceDescriptionCarriesTheClockTime() throws {
+        // 15:00 ちょうどから 1 時間 30 分後を選ぶと 16:30 に戻ることになる。
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        var components = DateComponents()
+        components.year = 2025
+        components.month = 9
+        components.day = 2
+        components.hour = 15
+        let base = try #require(calendar.date(from: components))
+
+        #expect(
+            EscapePolicy.returnChoiceDescription(90 * 60, from: base) == "1 時間 30 分後(16:30)"
+        )
+        #expect(
+            EscapePolicy.returnChoiceDescription(15 * 60, from: base) == "15 分後(15:15)"
+        )
+    }
+
     @Test("unlockAt まで 15 分未満なら選択肢は無い")
     func returnDelayChoicesAreEmptyWhenUnlockAtIsTooNear() {
         let choices = EscapePolicy.returnDelayChoices(
