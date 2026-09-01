@@ -3,11 +3,11 @@ import Testing
 
 @testable import MihariCore
 
-/// セーフティートグルの変更可否ルール(合意済みの仕様)を検証する。
+/// セーフティートグルの変更可否ルール(Epic #58「トグルの変更ルール」)を検証する。
 ///
-/// - OFF 方向(安全側)は常に即時。ただし quitLock の監視中 OFF と、canChangeLater == false
-///   の間の予約(クーリングオフ)は例外。
+/// - OFF 方向(安全側)は常に即時。例外は quitLock の監視中 OFF だけ。
 /// - ON 方向は監視していないときだけ。requires が OFF なら拒否。
+/// - canChangeLater == false の間は、ON 方向が 24 時間後の予約(クーリングオフ)になる。
 @Suite("セーフティーポリシー")
 struct SafetyPolicyTests {
 
@@ -31,7 +31,7 @@ struct SafetyPolicyTests {
         return settings
     }
 
-    // MARK: - OFF 方向は即時
+    // MARK: - OFF 方向は常に即時
 
     @Test("OFF は即時に効く")
     func disablingAppliesImmediately() {
@@ -93,8 +93,8 @@ struct SafetyPolicyTests {
         #expect(decision == .apply(expected, skipped: []))
     }
 
-    @Test("canChangeLater == false の間は OFF も 24 時間後の予約になる")
-    func disablingSchedulesDuringCoolingOff() {
+    @Test("canChangeLater == false でも OFF は即時に効く")
+    func disablingAppliesImmediatelyEvenDuringCoolingOff() {
         let current = makeSettings(enabled: [.macCamera], canChangeLater: false)
 
         let decision = SafetyPolicy.decide(
@@ -104,28 +104,19 @@ struct SafetyPolicyTests {
             now: now
         )
 
-        var expected = makeSettings(enabled: [.macCamera], canChangeLater: false)
-        expected.pendingChange = SafetyPendingChange(
-            disabling: [.macCamera],
+        // 安全側なので待たせない。canChangeLater はそのまま。
+        let expected = makeSettings(enabled: [], canChangeLater: false)
+        #expect(decision == .apply(expected, skipped: []))
+    }
+
+    @Test("OFF は同じ機能の ON 予約を取り消す")
+    func disablingRemovesTheFeatureFromThePendingChange() {
+        let pending = SafetyPendingChange(
+            enabling: [.macCamera, .discordExposure],
             restoresChangeability: false,
             effectiveAt: due
         )
-        // 予約は積むが、まだ OFF にしない。
-        #expect(decision == .schedule(expected))
-    }
-
-    @Test("予約が既にあれば disabling は和集合になり、発効は今回の 24 時間後に置き換わる")
-    func schedulingMergesDisablingAndResetsEffectiveAt() {
-        let previous = SafetyPendingChange(
-            disabling: [.quitLock],
-            restoresChangeability: false,
-            effectiveAt: now.addingTimeInterval(60 * 60)  // 1 時間前に入れた予約
-        )
-        let current = makeSettings(
-            enabled: [.macCamera, .quitLock],
-            canChangeLater: false,
-            pending: previous
-        )
+        let current = makeSettings(canChangeLater: false, pending: pending)
 
         let decision = SafetyPolicy.decide(
             .disable(.macCamera),
@@ -134,35 +125,58 @@ struct SafetyPolicyTests {
             now: now
         )
 
-        var expected = makeSettings(
-            enabled: [.macCamera, .quitLock],
-            canChangeLater: false
-        )
+        var expected = makeSettings(canChangeLater: false)
         expected.pendingChange = SafetyPendingChange(
-            disabling: [.quitLock, .macCamera],
+            enabling: [.discordExposure],
             restoresChangeability: false,
             effectiveAt: due
         )
-        #expect(decision == .schedule(expected))
+        #expect(decision == .apply(expected, skipped: []))
     }
 
-    @Test("監視中は予約された OFF でも quitLock だけは残して予約する")
-    func disablingDuringCoolingOffStillRespectsQuitLock() {
-        // canChangeLater == false かつ監視中は、quitLock は OFF 予約にすら入れない。
-        let current = makeSettings(enabled: [.macCamera, .quitLock], canChangeLater: false)
+    @Test("OFF で予約が空になれば予約ごと消える")
+    func disablingClearsThePendingChangeWhenItBecomesEmpty() {
+        let pending = SafetyPendingChange(
+            enabling: [.iphonePresence, .iphoneScreenshot],
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        let current = makeSettings(canChangeLater: false, pending: pending)
+
+        // 従属も一緒に落ちるので、予約の中身が空になる。
         let decision = SafetyPolicy.decide(
-            .disableAll,
+            .disable(.iphonePresence),
             current: current,
-            isWatching: true,
+            isWatching: false,
             now: now
         )
-        // schedule の disabling に quitLock が入っていないことを直接検証する。
-        guard case .schedule(let scheduled) = decision else {
-            Issue.record("disableAll が schedule になっていない")
-            return
-        }
-        #expect(scheduled.pendingChange?.disabling == Set(SafetyFeature.allCases).subtracting([.quitLock]))
-        #expect(scheduled.pendingChange?.effectiveAt == due)
+
+        #expect(decision == .apply(makeSettings(canChangeLater: false), skipped: []))
+    }
+
+    @Test("OFF で予約が空になっても、変更可否を戻す予約は残す")
+    func disablingKeepsThePendingChangeThatRestoresChangeability() {
+        let pending = SafetyPendingChange(
+            enabling: [.macCamera],
+            restoresChangeability: true,
+            effectiveAt: due
+        )
+        let current = makeSettings(canChangeLater: false, pending: pending)
+
+        let decision = SafetyPolicy.decide(
+            .disable(.macCamera),
+            current: current,
+            isWatching: false,
+            now: now
+        )
+
+        var expected = makeSettings(canChangeLater: false)
+        expected.pendingChange = SafetyPendingChange(
+            enabling: [],
+            restoresChangeability: true,
+            effectiveAt: due
+        )
+        #expect(decision == .apply(expected, skipped: []))
     }
 
     // MARK: - ON 方向
@@ -179,6 +193,28 @@ struct SafetyPolicyTests {
         )
 
         #expect(decision == .reject(.enablingWhileWatching))
+    }
+
+    @Test("監視中の ON は canChangeLater が false でも拒否(予約にもならない)")
+    func enablingWhileWatchingIsRejectedDuringCoolingOffToo() {
+        let current = makeSettings(canChangeLater: false)
+
+        let decision = SafetyPolicy.decide(
+            .enable(.macCamera),
+            current: current,
+            isWatching: true,
+            now: now
+        )
+
+        #expect(decision == .reject(.enablingWhileWatching))
+
+        let all = SafetyPolicy.decide(
+            .enableAll,
+            current: current,
+            isWatching: true,
+            now: now
+        )
+        #expect(all == .reject(.enablingWhileWatching))
     }
 
     @Test("ON は監視していなければ即時に効く")
@@ -223,6 +259,100 @@ struct SafetyPolicyTests {
 
         let expected = makeSettings(enabled: [.iphonePresence, .iphoneScreenshot])
         #expect(decision == .apply(expected, skipped: []))
+    }
+
+    // MARK: - クーリングオフ中の ON は予約になる
+
+    @Test("canChangeLater == false の間は ON が 24 時間後の予約になる")
+    func enablingSchedulesDuringCoolingOff() {
+        let current = makeSettings(canChangeLater: false)
+
+        let decision = SafetyPolicy.decide(
+            .enable(.macCamera),
+            current: current,
+            isWatching: false,
+            now: now
+        )
+
+        var expected = makeSettings(canChangeLater: false)
+        expected.pendingChange = SafetyPendingChange(
+            enabling: [.macCamera],
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        // 予約は積むが、まだ ON にしない。
+        #expect(decision == .schedule(expected, skipped: []))
+    }
+
+    @Test("canChangeLater == false の間は enableAll も予約になる")
+    func enableAllSchedulesDuringCoolingOff() {
+        let current = makeSettings(enabled: [.macCamera], canChangeLater: false)
+
+        let decision = SafetyPolicy.decide(
+            .enableAll,
+            current: current,
+            isWatching: false,
+            now: now
+        )
+
+        var expected = makeSettings(enabled: [.macCamera], canChangeLater: false)
+        expected.pendingChange = SafetyPendingChange(
+            enabling: Set(SafetyFeature.allCases),
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        #expect(decision == .schedule(expected, skipped: []))
+    }
+
+    @Test("予約中の機能を前提にした ON も予約できる")
+    func enablingOnTopOfAPendingDependencyIsAllowed() {
+        // iphonePresence が予約中なら、iphoneScreenshot も同じ予約に載せられる。
+        let pending = SafetyPendingChange(
+            enabling: [.iphonePresence],
+            restoresChangeability: false,
+            effectiveAt: now.addingTimeInterval(60 * 60)
+        )
+        let current = makeSettings(canChangeLater: false, pending: pending)
+
+        let decision = SafetyPolicy.decide(
+            .enable(.iphoneScreenshot),
+            current: current,
+            isWatching: false,
+            now: now
+        )
+
+        var expected = makeSettings(canChangeLater: false)
+        expected.pendingChange = SafetyPendingChange(
+            enabling: [.iphonePresence, .iphoneScreenshot],
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        #expect(decision == .schedule(expected, skipped: []))
+    }
+
+    @Test("予約が既にあれば enabling は和集合になり、発効は今回の 24 時間後に置き換わる")
+    func schedulingMergesEnablingAndResetsEffectiveAt() {
+        let previous = SafetyPendingChange(
+            enabling: [.quitLock],
+            restoresChangeability: false,
+            effectiveAt: now.addingTimeInterval(60 * 60)  // 1 時間前に入れた予約
+        )
+        let current = makeSettings(canChangeLater: false, pending: previous)
+
+        let decision = SafetyPolicy.decide(
+            .enable(.macCamera),
+            current: current,
+            isWatching: false,
+            now: now
+        )
+
+        var expected = makeSettings(canChangeLater: false)
+        expected.pendingChange = SafetyPendingChange(
+            enabling: [.quitLock, .macCamera],
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        #expect(decision == .schedule(expected, skipped: []))
     }
 
     // MARK: - 全部切り替え
@@ -278,9 +408,18 @@ struct SafetyPolicyTests {
         #expect(decision == .apply(.default, skipped: []))
     }
 
-    @Test("disableAll は canChangeLater == false なら全体を予約にする")
-    func disableAllSchedulesDuringCoolingOff() {
-        let current = makeSettings(enabled: [.macCamera, .discordExposure], canChangeLater: false)
+    @Test("disableAll は canChangeLater == false でも即時で、ON の予約を消す")
+    func disableAllAppliesImmediatelyAndClearsPendingDuringCoolingOff() {
+        let pending = SafetyPendingChange(
+            enabling: [.macCamera, .quitLock],
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        let current = makeSettings(
+            enabled: [.discordExposure],
+            canChangeLater: false,
+            pending: pending
+        )
 
         let decision = SafetyPolicy.decide(
             .disableAll,
@@ -289,17 +428,37 @@ struct SafetyPolicyTests {
             now: now
         )
 
-        var expected = makeSettings(
-            enabled: [.macCamera, .discordExposure],
-            canChangeLater: false
-        )
-        // OFF 方向の予約は「全部を切る」意図のまま、全機能が対象になる。
-        expected.pendingChange = SafetyPendingChange(
-            disabling: Set(SafetyFeature.allCases),
-            restoresChangeability: false,
+        #expect(decision == .apply(makeSettings(canChangeLater: false), skipped: []))
+    }
+
+    @Test("監視中の disableAll でも ON の予約は全部消える")
+    func disableAllClearsPendingEvenWhenQuitLockIsSkipped() {
+        let pending = SafetyPendingChange(
+            enabling: [.macCamera],
+            restoresChangeability: true,
             effectiveAt: due
         )
-        #expect(decision == .schedule(expected))
+        let current = makeSettings(
+            enabled: [.quitLock, .discordExposure],
+            canChangeLater: false,
+            pending: pending
+        )
+
+        let decision = SafetyPolicy.decide(
+            .disableAll,
+            current: current,
+            isWatching: true,
+            now: now
+        )
+
+        var expected = makeSettings(enabled: [.quitLock], canChangeLater: false)
+        // 変更可否を戻す予約だけは残る(OFF 方向の依頼と関係がないため)。
+        expected.pendingChange = SafetyPendingChange(
+            enabling: [],
+            restoresChangeability: true,
+            effectiveAt: due
+        )
+        #expect(decision == .apply(expected, skipped: [.quitLock]))
     }
 
     // MARK: - 変更可能性の切り替え
@@ -346,21 +505,21 @@ struct SafetyPolicyTests {
 
         var expected = makeSettings(enabled: [.macCamera], canChangeLater: false)
         expected.pendingChange = SafetyPendingChange(
-            disabling: [],
+            enabling: [],
             restoresChangeability: true,
             effectiveAt: due
         )
-        #expect(decision == .schedule(expected))
+        #expect(decision == .schedule(expected, skipped: []))
     }
 
     @Test("cancelPendingChange は即時に予約を消す")
     func cancelPendingChangeClearsReservation() {
         let pending = SafetyPendingChange(
-            disabling: [.macCamera],
+            enabling: [.macCamera],
             restoresChangeability: false,
             effectiveAt: due
         )
-        let current = makeSettings(enabled: [.macCamera], canChangeLater: false, pending: pending)
+        let current = makeSettings(canChangeLater: false, pending: pending)
 
         let decision = SafetyPolicy.decide(
             .cancelPendingChange,
@@ -369,8 +528,7 @@ struct SafetyPolicyTests {
             now: now
         )
 
-        let expected = makeSettings(enabled: [.macCamera], canChangeLater: false)
-        #expect(decision == .apply(expected, skipped: []))
+        #expect(decision == .apply(makeSettings(canChangeLater: false), skipped: []))
     }
 
     // MARK: - 予約の発効
@@ -378,54 +536,53 @@ struct SafetyPolicyTests {
     @Test("発効時刻前なら予約は適用されない")
     func pendingChangeDoesNotApplyBeforeEffectiveAt() {
         let pending = SafetyPendingChange(
-            disabling: [.macCamera],
+            enabling: [.macCamera],
             restoresChangeability: false,
             effectiveAt: due
         )
-        let current = makeSettings(enabled: [.macCamera], canChangeLater: false, pending: pending)
+        let current = makeSettings(canChangeLater: false, pending: pending)
 
         let applied = SafetyPolicy.applyingDuePendingChange(current, now: now)
 
         #expect(applied == current)
     }
 
-    @Test("発効時刻が来たら予約どおり OFF にして pendingChange を消す")
+    @Test("発効時刻が来たら予約どおり ON にして pendingChange を消す")
     func pendingChangeAppliesAtEffectiveAt() {
         let pending = SafetyPendingChange(
-            disabling: [.macCamera],
+            enabling: [.macCamera],
             restoresChangeability: false,
             effectiveAt: due
         )
-        let current = makeSettings(enabled: [.macCamera], canChangeLater: false, pending: pending)
+        let current = makeSettings(canChangeLater: false, pending: pending)
 
         let applied = SafetyPolicy.applyingDuePendingChange(current, now: due)
 
-        #expect(applied == makeSettings(enabled: [], canChangeLater: false))
+        #expect(applied == makeSettings(enabled: [.macCamera], canChangeLater: false))
     }
 
-    @Test("適用時に従属も巻き込んで OFF にする")
-    func pendingChangePullsDependents() {
+    @Test("発効は監視中かどうかを見ない")
+    func pendingChangeAppliesRegardlessOfWatching() {
+        // 監視は起動と同時に始まるので、ここで監視中を理由に見送ると予約が永久に
+        // 発効しなくなる。24 時間の熟慮は済んでいるため、そのまま適用する。
         let pending = SafetyPendingChange(
-            disabling: [.iphonePresence],
+            enabling: [.quitLock],
             restoresChangeability: false,
             effectiveAt: due
         )
-        let current = makeSettings(
-            enabled: [.iphonePresence, .iphoneScreenshot],
-            canChangeLater: false,
-            pending: pending
-        )
+        let current = makeSettings(canChangeLater: false, pending: pending)
 
+        // applyingDuePendingChange は isWatching を引数に取らない(見ないことの証明)。
         let applied = SafetyPolicy.applyingDuePendingChange(current, now: due)
 
-        #expect(applied.enabled.isEmpty)
+        #expect(applied.enabled == [.quitLock])
         #expect(applied.pendingChange == nil)
     }
 
     @Test("restoresChangeability が true なら発効時に変更可能性も戻す")
     func pendingChangeRestoresChangeability() {
         let pending = SafetyPendingChange(
-            disabling: [],
+            enabling: [],
             restoresChangeability: true,
             effectiveAt: due
         )
@@ -441,17 +598,18 @@ struct SafetyPolicyTests {
 
     @Test("発効後も依存を満たさない ON は normalized が落とす")
     func pendingChangeResultIsNormalized() {
-        // 予約が「iphonePresence」だけを落とし、iphoneScreenshot は予約漏れしていた状況。
+        // 予約に従属(iphoneScreenshot)だけが載っていて、前提の iphonePresence が
+        // 予約に入っていなかった状況。従属だけが立つことはない。
         let pending = SafetyPendingChange(
-            disabling: [.iphonePresence],
+            enabling: [.iphoneScreenshot],
             restoresChangeability: false,
             effectiveAt: due
         )
-        // 依存を満たさない iphoneScreenshot が ON のまま残ることはない。
-        let current = makeSettings(enabled: [.iphoneScreenshot], canChangeLater: false, pending: pending)
+        let current = makeSettings(canChangeLater: false, pending: pending)
 
         let applied = SafetyPolicy.applyingDuePendingChange(current, now: due)
 
         #expect(applied.enabled.isEmpty)
+        #expect(applied.pendingChange == nil)
     }
 }

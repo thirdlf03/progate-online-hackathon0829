@@ -59,6 +59,23 @@ public enum EscapePolicy {
         idleSeconds <= 60
     }
 
+    /// 宣言ダイアログの選択肢 1 つの表示文言。「1 時間 30 分後(18:00)」の形。
+    ///
+    /// 「1 時間 30 分後」だけだと何時に戻る約束をしたのか計算させることになるので、
+    /// 実際の時刻まで書く。
+    public static func returnChoiceDescription(_ delay: TimeInterval, from now: Date) -> String {
+        "\(durationDescription(delay))後(\(clockText(now.addingTimeInterval(delay))))"
+    }
+
+    /// 時刻だけの表示文字列。`HH:mm` の形にする。
+    static func clockText(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle()
+                .hour(.twoDigits(amPM: .omitted))
+                .minute(.twoDigits)
+        )
+    }
+
     /// 残り時間の「N 時間 M 分」表記。1 分未満は 1 分に繰り上げる。
     ///
     /// メニューの冷却表示・カウントダウン表示・ペットの催促セリフで共通で使う。

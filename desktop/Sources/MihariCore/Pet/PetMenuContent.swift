@@ -25,9 +25,10 @@ private struct PetMenuEntryList: View {
     var body: some View {
         ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
             switch entry {
-            case .item(let title, let isChecked, let action):
+            case .item(let title, let isChecked, let isEnabled, let action):
                 // チェックの有無をそのまま出すため、押されたら `action` を呼ぶだけの Toggle にする。
                 Toggle(title, isOn: Binding(get: { isChecked }, set: { _ in action() }))
+                    .disabled(!isEnabled)
             case .submenu(let title, let entries):
                 Menu(title) {
                     PetMenuEntryList(entries: entries)

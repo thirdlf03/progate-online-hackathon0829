@@ -67,7 +67,7 @@ def select_channel(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         )
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"チャンネルの指定が不正: {error}",
         ) from error
 
@@ -120,7 +120,7 @@ async def post_evidence(request: Request, body: dict[str, Any]) -> dict[str, Any
 
     if not text and image is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="text か image のどちらかは必要",
         )
 
@@ -164,7 +164,7 @@ async def set_schedule(request: Request, body: dict[str, Any]) -> dict[str, Any]
         hour, minute = parse_time_of_day(str(raw_time))
     except InvalidTimeError as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
         ) from error
 
     scheduler.schedule_at(hour, minute, requested_by=requested_by)
@@ -185,6 +185,6 @@ def _decode_image(raw: Any) -> bytes | None:
         return base64.b64decode(str(raw), validate=True)
     except (binascii.Error, ValueError) as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"画像を base64 として読めない: {error}",
         ) from error

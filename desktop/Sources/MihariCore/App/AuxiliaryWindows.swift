@@ -53,7 +53,7 @@ final class AuxiliaryWindows {
     func showSafety<Content: View>(@ViewBuilder content: () -> Content) {
         safety = present(
             safety,
-            title: "設定",
+            title: "セーフティー設定",
             size: NSSize(width: 640, height: 720),
             content: content()
         )
@@ -86,10 +86,13 @@ final class AuxiliaryWindows {
 
     /// 執行猶予脱出の宣言ダイアログを出す。
     func showEscape<Content: View>(@ViewBuilder content: () -> Content) {
+        // 見出しはこのウィンドウ題 1 つだけにする。中身に同じ見出しをもう 1 行置くと、
+        // 同じことを 2 回言うだけになる。
         escape = present(
             escape,
-            title: "終了の宣言",
-            size: NSSize(width: 420, height: 200),
+            title: "どうしても終了する",
+            // 本文が 4 行あるので、200 では説明とピッカーが見切れる。
+            size: NSSize(width: 420, height: 300),
             content: content()
         )
     }

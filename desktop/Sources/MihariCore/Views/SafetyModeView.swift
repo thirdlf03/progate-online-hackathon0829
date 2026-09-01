@@ -12,16 +12,29 @@ public struct SafetyModeView: View {
 
     /// この画面が置かれる場所。フッターと「設定画面のみ」の表示を出し分ける。
     public enum Context {
-        /// オンボーディングの 1 枚目。「次へ」で権限ステップへ進む。
-        case onboarding(onNext: () -> Void)
+        /// オンボーディングの 1 枚目。ボタンで次へ進む。
+        ///
+        /// キャプションとボタンの文言は呼び側(`OnboardingFlowView`)が決める。権限
+        /// ステップを飛ばせるときは「次へ」ではなく、そこで終わることが分かる文言になる。
+        case onboarding(caption: String, nextTitle: String, onNext: () -> Void)
         /// 右クリックメニューから開く設定画面。「閉じる」で閉じる。
         case settings(onClose: () -> Void)
     }
 
     @ObservedObject private var safety: SafetySettingsStore
+    /// カードの権限行に出す TCC 権限の状態。ON にした直後にプロンプトを断られても
+    /// 気づけるように、静的な案内ではなくこのモデルの状態を出す。
+    @ObservedObject private var permissions: PermissionsModel
+    /// カードの権限行に出す tunneld の常駐状態(iphoneScreenshot 用)。
+    @ObservedObject private var tunneld: TunneldModel
     /// いま監視中か。呼び側が渡す(オンボーディングでは常に false)。
     /// 値の変化は呼び側が `@ObservedObject` 経由で View を作り直して映す。
     private let isWatching: Bool
+    /// 終了ロックの解除時刻。ロック中でなければ nil(オンボーディングでは常に nil)。
+    ///
+    /// ロック中は監視を止めていても設定を緩められないが、それを「監視中」と書くと
+    /// 監視を止めた人を混乱させるので、監視とロックは分けて受け取る(#52)。
+    private let lockedUntil: Date?
     private let context: Context
     private let onFeatureEnabled: (SafetyFeature) -> Void
     /// 「Mihari をアンインストール…」を押したときの処理。設定画面だけ渡す
@@ -37,7 +50,10 @@ public struct SafetyModeView: View {
     @State private var messageTasks: [SafetyFeature: Task<Void, Never>] = [:]
 
     /// - Parameters:
+    ///   - permissions: TCC 権限の状態。カードの権限行に映す。
+    ///   - tunneld: tunneld の常駐状態。カードの権限行に映し、「登録する…」から使う。
     ///   - isWatching: いま監視中か。設定画面では `AppCoordinator` の `isWatching` を映す。
+    ///   - lockedUntil: 終了ロックの解除時刻。ロック中でなければ nil。
     ///   - onFeatureEnabled: ON に成功した(`.apply` で新たに ON になった)機能ごとに呼ばれる。
     ///     呼び側が権限要求・tunneld 登録に使う。
     ///   - onUninstall: 「Mihari をアンインストール…」の処理。設定画面だけ渡し、
@@ -45,14 +61,20 @@ public struct SafetyModeView: View {
     ///   - canUninstall: アンインストールできるか。オンボーディングでは false。
     public init(
         safety: SafetySettingsStore,
+        permissions: PermissionsModel,
+        tunneld: TunneldModel,
         isWatching: Bool,
+        lockedUntil: Date?,
         context: Context,
         onFeatureEnabled: @escaping (SafetyFeature) -> Void,
         onUninstall: (() -> Void)?,
         canUninstall: Bool
     ) {
         self.safety = safety
+        self.permissions = permissions
+        self.tunneld = tunneld
         self.isWatching = isWatching
+        self.lockedUntil = lockedUntil
         self.context = context
         self.onFeatureEnabled = onFeatureEnabled
         self.onUninstall = onUninstall
@@ -77,6 +99,14 @@ public struct SafetyModeView: View {
                 .padding(.vertical, 12)
                 .background(.bar)
         }
+        .task {
+            // 開いた時点の状態を映す。ここで見に行かないと、別の場所で拒否・解除された
+            // 権限が古いまま「許可済み」に見えてしまう。
+            permissions.refresh()
+            if safety.isEnabled(.iphoneScreenshot) {
+                await tunneld.refresh()
+            }
+        }
     }
 
     // MARK: - 固定ヘッダー
@@ -100,7 +130,7 @@ public struct SafetyModeView: View {
                     .controlSize(.small)
                     .buttonStyle(.bordered)
                     .disabled(
-                        safety.settings.enabled.count == SafetyFeature.total || isWatching
+                        safety.settings.enabled.count == SafetyFeature.total || isRestricted
                     )
                 Button("全部 OFF") { applyAllOff() }
                     .controlSize(.small)
@@ -177,11 +207,14 @@ public struct SafetyModeView: View {
         }
     }
 
-    /// 1 枚のカード。依存で無効(iphonePresence が OFF のときの iphoneScreenshot)は
-    /// 親カードの下辺から吊り線でぶら下がる形にする。
+    /// 1 枚のカード。前提がまだ ON でない従属(iphonePresence が ON でないときの
+    /// iphoneScreenshot)は、親カードの下辺から吊り線でぶら下がる形にする。
+    ///
+    /// 前提が予約中なら従属も同じ予約に積めるので、吊り線と 1 行の説明は出すが、
+    /// 沈めない(押せるカードなので)。
     @ViewBuilder
     private func card(for feature: SafetyFeature) -> some View {
-        if isDependencyDisabled(feature) {
+        if let note = dependencyNote(for: feature) {
             VStack(alignment: .leading, spacing: 0) {
                 // 吊り線: 親カードの下辺から縦 12pt、横 22pt。カード間の 12pt をまたいで
                 // 親の下辺に届くよう、ブロックの上端から 12pt 上へずらし、横線はカードの
@@ -197,21 +230,18 @@ public struct SafetyModeView: View {
                 }
                 .offset(y: -12)
 
-                if !isWatching {
-                    // この行だけ opacity 1(カード本体は 0.5 で沈める)。
-                    Label(
-                        "「iPhone を見張る」を ON にすると選べます",
-                        systemImage: "arrow.turn.down.right"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 30)
-                    .padding(.bottom, 4)
+                if !isRestricted {
+                    // この行だけ opacity 1(選べないときのカード本体は 0.5 で沈める)。
+                    Label(note, systemImage: "arrow.turn.down.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 30)
+                        .padding(.bottom, 4)
                 }
 
                 cardBody(for: feature)
                     .padding(.leading, 24)
-                    .opacity(0.5)
+                    .opacity(isDependencyDisabled(feature) ? 0.5 : 1)
             }
         } else {
             cardBody(for: feature)
@@ -237,8 +267,8 @@ public struct SafetyModeView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
-                    if isLockedRowShown(for: feature) {
-                        Label("監視中は変更できません", systemImage: "lock.fill")
+                    if let note = lockedRowNote(for: feature) {
+                        Label(note, systemImage: "lock.fill")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -271,8 +301,7 @@ public struct SafetyModeView: View {
                             .font(.caption)
                             .bold()
                             .foregroundStyle(.secondary)
-                        Text(feature.permissionNote)
-                            .font(.callout)
+                        permissionValue(for: feature)
                     }
                 }
 
@@ -287,7 +316,67 @@ public struct SafetyModeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    /// 状態行。3 秒だけの文言と、設定画面の予約帯を並べる。
+    /// カードの「権限」行の中身。
+    ///
+    /// トグルが OFF のうちは何が要るかの静的な案内、ON にしたあとはいまの許可状態を出す。
+    /// 未許可・未登録のときは、そこから先へ進めるボタンを添える。
+    @ViewBuilder
+    private func permissionValue(for feature: SafetyFeature) -> some View {
+        switch permissionRowState(for: feature) {
+        case .staticNote(let text):
+            Text(text)
+                .font(.callout)
+        case .satisfied(let text):
+            Label(text, systemImage: "checkmark.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.green)
+        case .working(let text):
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        case .missing(let text, let actionTitle, let action):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(text, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(actionTitle) { perform(action, for: feature) }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private func permissionRowState(for feature: SafetyFeature) -> SafetyModeViewModel.PermissionRowState {
+        let kind = permissionKind(for: feature)
+        return SafetyModeViewModel.permissionRow(
+            for: feature,
+            isEnabled: safety.isEnabled(feature),
+            kind: kind,
+            grant: kind.map { permissions.state(for: $0).grant },
+            tunneld: feature == .iphoneScreenshot
+                ? SafetyModeViewModel.readiness(of: tunneld.status)
+                : nil
+        )
+    }
+
+    /// この機能が要求する TCC 権限。要らない機能では nil。
+    private func permissionKind(for feature: SafetyFeature) -> PermissionKind? {
+        PermissionKind.allCases.first { $0.feature == feature }
+    }
+
+    /// 権限行のボタンを押したとき。
+    private func perform(_ action: SafetyModeViewModel.PermissionRowAction, for feature: SafetyFeature) {
+        switch action {
+        case .openSystemSettings:
+            // 一度断られた TCC はアプリから再要求できないので、システム設定へ送る。
+            guard let kind = permissionKind(for: feature) else { return }
+            permissions.openSettings(for: kind)
+        case .installTunneld:
+            Task { await tunneld.install() }
+        }
+    }
+
+    /// 状態行。操作の結果の文言と、設定画面の予約帯を並べる。
     @ViewBuilder
     private func statusRow(for feature: SafetyFeature) -> some View {
         if let message = cardMessages[feature] {
@@ -296,21 +385,18 @@ public struct SafetyModeView: View {
                 .foregroundStyle(.orange)
         }
         if case .settings = context, let pending = safety.settings.pendingChange,
-            pending.disabling.contains(feature)
+            pending.enabling.contains(feature)
         {
-            pendingBand(effectiveAt: pending.effectiveAt) {
-                _ = safety.request(.cancelPendingChange, isWatching: isWatching)
+            pendingBand(text: SafetyModeViewModel.pendingFeatureText(effectiveAt: pending.effectiveAt)) {
+                _ = safety.request(.cancelPendingChange, isWatching: isRestricted)
             }
         }
     }
 
     /// 予約帯(取り消しボタン付き)。カード内と設定画面の最下部で同じ見た目にする。
-    private func pendingBand(effectiveAt: Date, onCancel: @escaping () -> Void) -> some View {
+    private func pendingBand(text: String, onCancel: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
-            Label(
-                SafetyModeViewModel.pendingStatusText(effectiveAt: effectiveAt),
-                systemImage: "clock"
-            )
+            Label(text, systemImage: "clock")
             Spacer()
             Button("取り消す", action: onCancel)
                 .controlSize(.small)
@@ -323,9 +409,12 @@ public struct SafetyModeView: View {
     /// 設定画面の最下部の予約帯。カードの予約帯より上に「取り消す」の意味を
     /// 1 本にまとめたいときは閉じる側でカード側を隠すこともできるが、design-54.md は
     /// 両方出す形なのでそのままにする。
+    @ViewBuilder
     private var bottomPendingBand: some View {
-        pendingBand(effectiveAt: safety.settings.pendingChange?.effectiveAt ?? Date()) {
-            _ = safety.request(.cancelPendingChange, isWatching: isWatching)
+        if let pending = safety.settings.pendingChange {
+            pendingBand(text: SafetyModeViewModel.pendingStatusText(for: pending)) {
+                _ = safety.request(.cancelPendingChange, isWatching: isRestricted)
+            }
         }
     }
 
@@ -337,23 +426,39 @@ public struct SafetyModeView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("あとで設定を変えられるようにする")
                     .font(.body)
-                Text(
-                    safety.settings.canChangeLater
-                        ? "いつでも設定を変えられます。"
-                        : "緩める変更は 24 時間後に効くようになります。"
-                )
-                .font(.caption)
-                .foregroundStyle(safety.settings.canChangeLater ? Color.secondary : Color.orange)
+                Text(changeLaterCaption)
+                    .font(.caption)
+                    .foregroundStyle(safety.settings.canChangeLater ? Color.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .toggleStyle(.switch)
+    }
+
+    /// 「あとで設定を変えられるようにする」の説明文。
+    ///
+    /// ON に戻す操作は予約になり、トグルは OFF のまま戻る。何も起きなかったように
+    /// 見えてしまうので、予約中はその旨と発効時刻を書く。
+    ///
+    /// OFF にすると何が起きるかは、いまの状態にかかわらず必ず添える。ON のうちに
+    /// 読めなければ、押したあとで初めて 24 時間待たされることを知ることになる。
+    private var changeLaterCaption: String {
+        let consequence = "OFF にすると、設定を緩める変更と、この設定を戻す操作が 24 時間後に発効します(予約は取り消せます)。"
+        if safety.settings.canChangeLater {
+            return "いつでも設定を変えられます。\n\(consequence)"
+        }
+        if let pending = safety.settings.pendingChange, pending.restoresChangeability {
+            let time = SafetyModeViewModel.pendingTimeText(effectiveAt: pending.effectiveAt)
+            return "ON に戻す予約中(\(time))\n\(consequence)"
+        }
+        return consequence
     }
 
     private var changeLaterBinding: Binding<Bool> {
         Binding(
             get: { safety.settings.canChangeLater },
             set: { enabled in
-                _ = safety.request(.setCanChangeLater(enabled), isWatching: isWatching)
+                _ = safety.request(.setCanChangeLater(enabled), isWatching: isRestricted)
             }
         )
     }
@@ -363,20 +468,24 @@ public struct SafetyModeView: View {
     @ViewBuilder
     private var footer: some View {
         switch context {
-        case .onboarding(let onNext):
+        case .onboarding(let caption, let nextTitle, let onNext):
             HStack {
-                Text("全部 OFF のままでも始められます。あとから設定で変えられます。")
+                Text(caption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                Button("次へ", action: onNext)
+                Button(nextTitle, action: onNext)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
             }
         case .settings(let onClose):
             HStack {
-                if isWatching {
-                    Label("監視中: ON にする変更はできません", systemImage: "lock.fill")
+                if let note = SafetyModeViewModel.footerRestrictionNote(
+                    isWatching: isWatching,
+                    lockedUntil: lockedUntil
+                ) {
+                    Label(note, systemImage: "lock.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -411,24 +520,27 @@ public struct SafetyModeView: View {
     /// カードの Toggle を操作したとき。ポリシーに問い合わせて、結果に応じて
     /// 状態行を見せ、ON になった機能を呼び出し側へ知らせる。
     private func handleToggle(for feature: SafetyFeature, turningOn: Bool) {
+        clearMessages()
         let previous = safety.settings
         let decision = safety.request(
             SafetyModeViewModel.toggleChange(for: feature, turningOn: turningOn),
-            isWatching: isWatching
+            isWatching: isRestricted
         )
         handleDecision(decision, from: previous, affectedFeature: feature)
     }
 
     private func applyAllOn() {
+        clearMessages()
         let previous = safety.settings
-        let decision = safety.request(.enableAll, isWatching: isWatching)
+        let decision = safety.request(.enableAll, isWatching: isRestricted)
         // 拒否は起こり得ない(監視中はボタンが押せない)が、来たときの出し先が要るだけ。
         handleDecision(decision, from: previous, affectedFeature: .macCamera)
     }
 
     private func applyAllOff() {
+        clearMessages()
         let previous = safety.settings
-        let decision = safety.request(.disableAll, isWatching: isWatching)
+        let decision = safety.request(.disableAll, isWatching: isRestricted)
         handleDecision(decision, from: previous, affectedFeature: .macCamera)
     }
 
@@ -445,25 +557,35 @@ public struct SafetyModeView: View {
                 onFeatureEnabled(feature)
             }
             for feature in skipped {
+                // 頼んだとおりにできなかった報せなので、成功と違って自分からは消さない。
                 showMessage(
-                    SafetyModeViewModel.statusMessage(for: decision) ?? "",
-                    on: feature
+                    SafetyModeViewModel.statusMessage(for: decision, lockedUntil: lockedUntil) ?? "",
+                    on: feature,
+                    transient: false
                 )
             }
         case .schedule:
             // 予約帯が出て結果を示すので、ここでは何もしない。
             break
         case .reject:
-            if let message = SafetyModeViewModel.statusMessage(for: decision) {
-                showMessage(message, on: affectedFeature)
+            if let message = SafetyModeViewModel.statusMessage(
+                for: decision,
+                lockedUntil: lockedUntil
+            ) {
+                showMessage(message, on: affectedFeature, transient: false)
             }
         }
     }
 
-    /// 状態行に 3 秒だけメッセージを出す。前のが残っていれば取り消して張り直す。
-    private func showMessage(_ message: String, on feature: SafetyFeature) {
+    /// 状態行にメッセージを出す。前のが残っていれば取り消して張り直す。
+    ///
+    /// - Parameter transient: 3 秒で自分から消えてよいか。断った理由やエラーは消さずに
+    ///   次の操作まで残す ―― 3 秒で消えると、拒否されたこと自体に気づけない。
+    private func showMessage(_ message: String, on feature: SafetyFeature, transient: Bool) {
         cardMessages[feature] = message
         messageTasks[feature]?.cancel()
+        messageTasks[feature] = nil
+        guard transient else { return }
         // タスクは @State に持つので、ビューが作り直されても消えない。self は
         // 値型のコピーを捉えるだけで循環はしない。
         messageTasks[feature] = Task {
@@ -471,6 +593,15 @@ public struct SafetyModeView: View {
             guard !Task.isCancelled else { return }
             self.cardMessages[feature] = nil
         }
+    }
+
+    /// 残っているメッセージを全部消す。次の操作を始める前に呼ぶ。
+    private func clearMessages() {
+        for task in messageTasks.values {
+            task.cancel()
+        }
+        messageTasks = [:]
+        cardMessages = [:]
     }
 
     private func toggleBinding(for feature: SafetyFeature) -> Binding<Bool> {
@@ -482,25 +613,51 @@ public struct SafetyModeView: View {
 
     // MARK: - 状態
 
+    /// 設定を緩められない状態か。監視中か、監視を止めていても終了ロックが残っているとき。
+    ///
+    /// `SafetyPolicy` に渡す「監視中」はこの値。ロック中に監視だけ止めて縛りごと
+    /// 外す抜け道を作らないため、ロック中も監視中として扱う(#52)。
+    private var isRestricted: Bool {
+        isWatching || lockedUntil != nil
+    }
+
     /// 予約中(発効待ち)か。予約の対象になっている機能と設定画面の最下部で使う。
     private var isPending: Bool {
         safety.settings.pendingChange != nil
     }
 
     private func isPending(_ feature: SafetyFeature) -> Bool {
-        safety.settings.pendingChange?.disabling.contains(feature) == true
+        safety.settings.pendingChange?.enabling.contains(feature) == true
     }
 
-    /// 前提(`requires`)のトグルが OFF で選べない機能か。
+    /// 前提(`requires`)のトグルが ON でも予約中でもなく、選べない機能か。
+    ///
+    /// 前提が予約中(発効待ちの ON に載っている)なら、ポリシーは従属も同じ予約に
+    /// 積むことを認める(`SafetyPolicy.decideEnable`)ので、選べないとは扱わない。
     private func isDependencyDisabled(_ feature: SafetyFeature) -> Bool {
         guard let required = feature.requires else { return false }
-        return !safety.isEnabled(required)
+        return !safety.isEnabled(required) && !isPending(required)
     }
 
-    /// Toggle 左に錠の行を出すか。監視中は ON 方向が一切できないので、
+    /// 従属のカードに添える 1 行。前提が ON なら何も添えない。
+    private func dependencyNote(for feature: SafetyFeature) -> String? {
+        guard let required = feature.requires else { return nil }
+        return SafetyModeViewModel.dependencyNote(
+            isRequiredEnabled: safety.isEnabled(required),
+            isRequiredPending: isPending(required)
+        )
+    }
+
+    /// Toggle 左に出す錠の行の文言。監視中は ON 方向が一切できないので、
     /// OFF のままの機能すべてに出す(ON 中の機能は OFF はできる。quitLock だけ例外)。
-    private func isLockedRowShown(for feature: SafetyFeature) -> Bool {
-        isWatching && !safety.isEnabled(feature)
+    ///
+    /// - Returns: 出す文言。制限がかかっていないか、その機能が ON なら nil。
+    private func lockedRowNote(for feature: SafetyFeature) -> String? {
+        guard isRestricted, !safety.isEnabled(feature) else { return nil }
+        return SafetyModeViewModel.cardRestrictionNote(
+            isWatching: isWatching,
+            lockedUntil: lockedUntil
+        )
     }
 
     /// Toggle を押せなくするか。
@@ -513,7 +670,7 @@ public struct SafetyModeView: View {
         if isDependencyDisabled(feature) {
             return true
         }
-        if isWatching {
+        if isRestricted {
             if feature == .quitLock, safety.isEnabled(.quitLock) {
                 return false
             }

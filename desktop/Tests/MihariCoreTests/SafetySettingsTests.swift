@@ -51,7 +51,7 @@ struct SafetySettingsTests {
         settings.enabled = [.iphonePresence, .iphoneScreenshot, .quitLock]
         settings.canChangeLater = false
         settings.pendingChange = SafetyPendingChange(
-            disabling: [.macCamera],
+            enabling: [.macCamera],
             restoresChangeability: true,
             effectiveAt: Date(timeIntervalSince1970: 1_000_000)
         )
@@ -77,6 +77,28 @@ struct SafetySettingsTests {
         #expect(partial.canChangeLater)  // 欠けたキーの既定値
         #expect(partial.pendingChange == nil)
         #expect(partial.lastEscapeAt == nil)
+    }
+
+    @Test("Codable: 旧形式(disabling)の予約は中身を捨てて読む")
+    func codableIgnoresTheLegacyDisablingKey() throws {
+        // OFF 方向は常に即時になったので、旧キーに積まれていた OFF の予約は意味を失う。
+        // 落ちずに読めて、enabling が空になっていればよい。
+        let json = """
+            {
+              "enabled": ["macCamera"],
+              "canChangeLater": false,
+              "pendingChange": {
+                "disabling": ["macCamera"],
+                "restoresChangeability": true,
+                "effectiveAt": 1000000
+              }
+            }
+            """
+        let decoded = try JSONDecoder().decode(SafetySettings.self, from: Data(json.utf8))
+
+        #expect(decoded.enabled == [.macCamera])
+        #expect(decoded.pendingChange?.enabling.isEmpty == true)
+        #expect(decoded.pendingChange?.restoresChangeability == true)
     }
 
     @Test("モードは 3 分岐し、ラベルは本数と総数を出す")

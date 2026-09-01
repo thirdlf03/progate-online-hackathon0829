@@ -34,19 +34,27 @@ struct PermissionRow: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-                Text(kind.api)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(kind.api)
+                // 照会に使った API と生の返り値は、切り分けのための開発者向けの情報。
+                // ふだんは出さず、`MIHARI_DEBUG_UI=1` のときだけ見せる。
+                if AppCoordinator.isDebugUIRequested {
+                    Text(kind.api)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(kind.api)
+                }
             }
             .frame(minWidth: 260, alignment: .leading)
 
-            Text(state.detail)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if AppCoordinator.isDebugUIRequested {
+                Text(state.detail)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Spacer(minLength: 0)
+            }
 
             HStack(spacing: 8) {
                 if let title = kind.requestButtonTitle, state.grant != .granted {

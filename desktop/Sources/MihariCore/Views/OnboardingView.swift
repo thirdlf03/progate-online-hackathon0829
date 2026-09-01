@@ -96,7 +96,7 @@ public struct OnboardingView: View {
                     .disabled(!model.isRequiredSatisfied)
 
                 if !model.isRequiredSatisfied {
-                    Text("必須の権限が足りない: \(model.missingRequired.map(\.title).joined(separator: " / "))")
+                    Text("必須の権限が足りません: \(model.missingRequired.map(\.title).joined(separator: " / "))")
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
@@ -119,7 +119,7 @@ public struct OnboardingView: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("iPhone スクショの常駐(tunneld)").font(.headline)
-                    Text("iOS 17+ のスクショに必要なトンネルを OS に常駐させる。登録は管理者パスワードで 1 回だけ")
+                    Text("iOS 17+ のスクショに必要なトンネルを OS に常駐させます。登録は管理者パスワードで 1 回だけです")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -147,10 +147,16 @@ public struct OnboardingView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("権限の確認").font(.title2).bold()
-            Text("Mihari はサボりを検知すると、証拠として写真や画面を撮り、あなたが選んだ Discord チャンネルに送ります。")
+            Text("ステップ 1 で ON にした機能に必要な権限だけ確認します。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let names = enabledFeatureNames {
+                Text("ON にした機能: \(names)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack(spacing: 10) {
                 Button("まとめて許可を求める") { Task { await model.requestAll() } }
@@ -177,6 +183,16 @@ public struct OnboardingView: View {
         }
     }
 
+    /// ON にしている機能の名前を並べた 1 行。1 つも ON でなければ nil。
+    ///
+    /// 「何のためにこの権限を聞かれているのか」は、ON にした機能を並べて示す。
+    private var enabledFeatureNames: String? {
+        let names = SafetyFeature.allCases
+            .filter { model.settings.isEnabled($0) }
+            .map(\.title)
+        return names.isEmpty ? nil : names.joined(separator: "、")
+    }
+
     private var summary: String {
         let pending = model.pending
         if pending.isEmpty {
@@ -185,17 +201,20 @@ public struct OnboardingView: View {
         return "未許可: \(pending.map(\.title).joined(separator: " / "))"
     }
 
-    private var notes: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            noteText(
-                "TCC の許可はプロセスではなくバンドルの署名単位で記録される。ad-hoc 署名は再ビルドで署名が変わりうるため、一度許可した権限が再ビルド後に効かなくなることがある。その場合はシステム設定から一度削除して登録し直す。"
-            )
-            noteText(
-                "「画面収録」は事前照会の API が CGPreflightScreenCaptureAccess しかなく、未決定と拒否済みを区別できない。false のときは灰色で出る。"
-            )
-            noteText(
-                "「オートメーション」は対象アプリ(Music)が起動していないと判定できない。プロンプトは実際に命令を送った瞬間にだけ出る。"
-            )
+    /// TCC の挙動についての注記。開発者向けなので `MIHARI_DEBUG_UI=1` のときだけ出す。
+    @ViewBuilder private var notes: some View {
+        if AppCoordinator.isDebugUIRequested {
+            VStack(alignment: .leading, spacing: 6) {
+                noteText(
+                    "TCC の許可はプロセスではなくバンドルの署名単位で記録されます。ad-hoc 署名は再ビルドで署名が変わりうるため、一度許可した権限が再ビルド後に効かなくなることがあります。その場合はシステム設定から一度削除して登録し直してください。"
+                )
+                noteText(
+                    "「画面収録」は事前照会の API が CGPreflightScreenCaptureAccess しかなく、未決定と拒否済みを区別できません。false のときは灰色で出ます。"
+                )
+                noteText(
+                    "「オートメーション」は対象アプリ(Music)が起動していないと判定できません。プロンプトは実際に命令を送った瞬間にだけ出ます。"
+                )
+            }
         }
     }
 

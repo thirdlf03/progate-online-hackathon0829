@@ -2,8 +2,14 @@ import Foundation
 
 /// ペットメニューの 1 項目。右クリック(NSMenu)とメニューバー(SwiftUI)で同じ並びを出すための共通表現。
 public enum PetMenuEntry {
-    /// 押せる項目。`isChecked` が true ならチェックを付ける。
-    case item(title: String, isChecked: Bool = false, action: @MainActor () -> Void)
+    /// 項目。`isChecked` が true ならチェックを付ける。`isEnabled` が false なら
+    /// 灰色にして押せなくする(理由はタイトルに載せる)。
+    case item(
+        title: String,
+        isChecked: Bool = false,
+        isEnabled: Bool = true,
+        action: @MainActor () -> Void
+    )
     /// 入れ子のメニュー。
     case submenu(title: String, entries: [PetMenuEntry])
     /// 区切り線。
@@ -56,7 +62,7 @@ public enum PetMenuEntries {
             ),
             .separator,
             .item(
-                title: "設定…",
+                title: "セーフティー設定…",
                 action: { actions.openSafetySettings() }
             ),
             .item(
@@ -101,10 +107,11 @@ public enum PetMenuEntries {
                 .item(title: "どうしても終了する…", action: { actions.openEscapeDialog() })
             )
         case .coolingDown(let remaining):
-            // 冷却中は押しても何もしない。理由はタイトルに載せて伝える。
+            // 冷却中は灰色にして押せなくする。理由はタイトルに載せて伝える。
             entries.append(
                 .item(
                     title: "どうしても終了する(あと\(EscapePolicy.durationDescription(remaining))で使えます)",
+                    isEnabled: false,
                     action: {}
                 )
             )

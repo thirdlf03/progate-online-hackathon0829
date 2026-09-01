@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from device_bridge.daemon.auth import verify_token
@@ -17,6 +17,12 @@ router = APIRouter(tags=["events"], dependencies=[Depends(verify_token)])
 #: 何も流れないときに送るコメント行の間隔（秒）。
 #: 無音のままだと切断に気づけないため、定期的に生存を示す。
 KEEPALIVE_INTERVAL = 15.0
+
+#: ``POST /events/publish`` から流せるイベント名の接頭辞。
+#: この口は任意の名前を流せるので、``iphone.state`` のようにセーフティーの判定を
+#: 通ってから流れるはずのイベントを、判定を迂回して流せてしまう。用途は接続確認だけ
+#: なので、``test.`` で始まる名前に限る(唯一の呼び出し元は Swift の ``test.ping``)。
+PUBLISHABLE_NAME_PREFIX = "test."
 
 
 @router.get("/events")
@@ -50,12 +56,22 @@ async def stream_events(request: Request) -> StreamingResponse:
 
 @router.post("/events/publish")
 async def publish_event(request: Request, body: dict[str, Any]) -> dict[str, Any]:
-    """イベントを 1 件流す。
+    """接続確認用のイベントを 1 件流す。
 
     経路が通っているかを端から端まで確かめるために置いている。
     Discord Bot や iPhone の状態監視も、最終的にはここと同じ `EventBus.publish` を使う。
+    ただしそれらは自前でセーフティーの判定を通してから流すので、判定を持たない
+    この口から流せるのは ``test.`` で始まる名前だけにする。
     """
     name = str(body.get("name") or "message")
+    if not name.startswith(PUBLISHABLE_NAME_PREFIX):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"/events/publish から流せるのは接続確認用の "
+                f"「{PUBLISHABLE_NAME_PREFIX}」で始まるイベントだけ(受け取った名前: {name})"
+            ),
+        )
     payload = body.get("payload")
     event = Event(name=name, payload=payload if isinstance(payload, dict) else {})
     bus: EventBus = request.app.state.events

@@ -173,14 +173,14 @@ struct StatusPanelSnapshotTests {
         var reserved = SafetySettings()
         reserved.enabled = [.macCamera, .discordExposure, .photobomb]
         reserved.pendingChange = SafetyPendingChange(
-            disabling: [.discordExposure],
+            enabling: [.discordExposure],
             restoresChangeability: false,
             effectiveAt: now.addingTimeInterval(21 * 3600)
         )
         #expect(snapshot(settings: reserved).modeText == "カスタム(3/7)・変更予約 あと 21 時間")
 
         reserved.pendingChange = SafetyPendingChange(
-            disabling: [.discordExposure],
+            enabling: [.discordExposure],
             restoresChangeability: false,
             effectiveAt: now.addingTimeInterval(3 * 3600 + 25 * 60)
         )

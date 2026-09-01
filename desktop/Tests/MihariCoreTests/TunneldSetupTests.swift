@@ -117,7 +117,7 @@ struct TunneldModelTests {
         let model = makeModel(probeResults: [false], runner: runner)
         await model.uninstall()
         #expect(model.status == .notRunning)
-        #expect(model.message?.contains("解除した") == true)
+        #expect(model.message?.contains("解除しました") == true)
         #expect(runner.sources.first?.contains("uninstall_tunneld_daemon.sh") == true)
     }
 

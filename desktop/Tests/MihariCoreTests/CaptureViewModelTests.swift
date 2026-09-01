@@ -73,6 +73,51 @@ struct CaptureViewModelIPhoneTests {
         #expect(model.lastArtifact == nil)
         #expect(model.errorMessage?.contains("tunneld") == true)
     }
+
+    /// bridge を叩いた回数を数える箱。`@Sendable` クロージャから触るのでロックで守る。
+    private final class CallCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+
+        var count: Int { lock.withLock { value } }
+        func record() { lock.withLock { value += 1 } }
+    }
+
+    @Test("トグルが OFF なら bridge を叩かずにエラーで終わる")
+    func gateRejectionSkipsTheBridge() async {
+        // `AppCoordinator` がデバッグ画面に配線する閉包と同じ形。トグルの判定を
+        // 先頭に置いてあるので、OFF なら bridge には届かない(#58 の二重防御)。
+        let calls = CallCounter()
+        let gate = SafetyGate.denyAll
+        let model = CaptureViewModel(iphoneScreenshot: {
+            try gate.check(.iphoneScreenshot)
+            calls.record()
+            return Data([0x89, 0x50, 0x4E, 0x47])
+        })
+
+        await model.captureIPhoneScreenshot()
+
+        #expect(calls.count == 0)
+        #expect(model.lastArtifact == nil)
+        #expect(model.errorMessage != nil)
+    }
+
+    @Test("トグルが ON なら従来どおり取得する")
+    func gateAllowsTheCaptureWhenEnabled() async {
+        let calls = CallCounter()
+        let gate = SafetyGate(isEnabled: { $0 == .iphoneScreenshot })
+        let model = CaptureViewModel(iphoneScreenshot: {
+            try gate.check(.iphoneScreenshot)
+            calls.record()
+            return Data([0x89, 0x50, 0x4E, 0x47])
+        })
+
+        await model.captureIPhoneScreenshot()
+
+        #expect(calls.count == 1)
+        #expect(model.lastArtifact?.kind == .iphone)
+        try? model.lastArtifact?.delete()
+    }
 }
 
 @Suite("Mac スクショの画面収録権限")

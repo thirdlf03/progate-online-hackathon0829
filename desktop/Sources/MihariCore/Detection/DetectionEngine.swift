@@ -552,9 +552,15 @@ public final class DetectionEngine: ObservableObject {
         notifyPet(line: spoken?.text ?? "", audio: spoken?.audio, label: label)
 
         // 止める音楽が無いのに画面を覆っても空振りするだけ。鳴っているときだけ画面を奪う。
+        // 画面占領のトグルが OFF なら `interrupt` は何もしないので、呼ばずにそう記録する
+        // ―― 呼んだうえで「止めた」と書くと、記録が嘘になる。
         if signals.music.isPlaying {
-            await actions.interrupt(request)
-            notes.append("音楽を止めて聞かせた")
+            if safetyGate.isEnabled(.sermonTakeover) {
+                await actions.interrupt(request)
+                notes.append("音楽を止めて聞かせた")
+            } else {
+                notes.append("音楽は止めない(画面占領 OFF)")
+            }
         }
 
         // 証拠が取れても取れなくても、文面だけは投稿する。

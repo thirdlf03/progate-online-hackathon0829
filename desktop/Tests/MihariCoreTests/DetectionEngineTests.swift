@@ -387,6 +387,28 @@ struct DetectionExposureTests {
         #expect(loud.interrupted.first?.escalation == .expose)
     }
 
+    @Test("画面占領が OFF なら、音楽が鳴っていても奪わないと記録する")
+    func doesNotInterruptWhenTakeoverIsOff() async {
+        let spy = ActionSpy()
+        let engine = makeDetectionEngine(
+            idle: IdleClock(600),
+            spy: spy,
+            music: .playing(.spotify)
+        )
+        // 画面占領(#4)だけを外す。晒しは従来どおり動かす。
+        engine.safetyGate = SafetyGate(isEnabled: { $0 != .sermonTakeover })
+        engine.runDebugStep(.expose)
+        await settle(until: {
+            if case .clingy = engine.state { return true }
+            return false
+        })
+
+        #expect(spy.interrupted.isEmpty)
+        // 呼んでいないものを「止めた」と書かない。
+        #expect(engine.log.contains { $0.outcome.contains("音楽は止めない(画面占領 OFF)") })
+        #expect(!engine.log.contains { $0.outcome.contains("音楽を止めて聞かせた") })
+    }
+
     @Test("撮れなくても文面だけは投稿し、メンヘラモードには進む")
     func captureFailureStillPostsTextAndEntersClingy() async throws {
         let spy = ActionSpy()

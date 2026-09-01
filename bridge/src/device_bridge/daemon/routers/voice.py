@@ -262,13 +262,13 @@ def _parse_screenshot(body: dict[str, Any]) -> bytes | None:
         png = base64.b64decode(encoded, validate=True)
     except ValueError as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="screenshot_png を base64 として解釈できない",
         ) from error
 
     if not png.startswith(_PNG_SIGNATURE):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="screenshot_png が PNG ではない",
         )
     return png
@@ -287,7 +287,7 @@ def _parse_context(body: dict[str, Any]) -> SpeechContext:
         )
     except (TypeError, ValueError) as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"状況を解釈できない: {error}",
         ) from error
 

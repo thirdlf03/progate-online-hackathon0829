@@ -90,7 +90,7 @@ public final class PermissionsModel: ObservableObject {
             guard state(for: kind).grant != .granted else { continue }
             messages.append(await requestPermission(kind))
         }
-        lastMessage = messages.isEmpty ? "要求が必要な権限はなかった" : messages.joined(separator: " / ")
+        lastMessage = messages.isEmpty ? "要求が必要な権限はありませんでした" : messages.joined(separator: " / ")
         refresh()
     }
 
@@ -111,7 +111,7 @@ public final class PermissionsModel: ObservableObject {
 
     public func openSettings(for kind: PermissionKind) {
         if !kind.pane.open() {
-            lastMessage = "システム設定を開けなかった: \(kind.pane.rawValue)"
+            lastMessage = "システム設定を開けませんでした: \(kind.pane.rawValue)"
         }
     }
 }
