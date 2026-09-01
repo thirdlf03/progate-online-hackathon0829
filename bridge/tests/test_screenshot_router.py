@@ -186,3 +186,13 @@ def test_post_screenshot_returns_502_when_capture_fails(
 
     assert response.status_code == 502
     assert "device disconnected" in response.json()["detail"]
+
+
+def test_post_screenshot_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    # 撮影は実機の前に拒否されるので、フェイクの差し替えは不要。
+    response = safe_client.post("/iphone/screenshot", headers=auth)
+
+    assert response.status_code == 403
+    assert "iPhone の画面を撮る" in response.json()["detail"]

@@ -6,6 +6,8 @@ import os
 
 from fastapi import APIRouter, Request
 
+from device_bridge.daemon.safety import get_safety
+
 router = APIRouter(tags=["health"])
 
 
@@ -19,4 +21,7 @@ def health(request: Request) -> dict[str, object]:
         "status": "ok",
         "pid": os.getpid(),
         "subscribers": request.app.state.events.subscriber_count,
+        # どの機能が OFF になっているか、デバッグで一目で分かるように出す。
+        # キーの形は Swift 側と共有する契約(camelCase)のまま。
+        "safety": get_safety(request).to_payload(),
     }

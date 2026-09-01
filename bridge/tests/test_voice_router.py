@@ -539,3 +539,55 @@ def test_screen_rejects_a_broken_screenshot(client: TestClient, auth: dict[str, 
     )
 
     assert response.status_code == 422
+
+
+# ---- セーフティー(既定の全 OFF)での拒否と、OFF でも通る操作 ----------------
+
+
+def test_screen_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    # 画面を読むこと自体が「撮る」の一部なので、スクショ無しでも 403。
+    response = safe_client.post("/voice/screen", json={"idle_seconds": 300}, headers=auth)
+
+    assert response.status_code == 403
+    assert "iPhone の画面を撮る" in response.json()["detail"]
+
+
+def test_line_with_a_screenshot_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    # スクショを送ってきたのに OFF なら、黙って捨てず 403 で返す。
+    response = safe_client.post(
+        "/voice/line",
+        json={"idle_seconds": 300, "screenshot_png": PNG_B64},
+        headers=auth,
+    )
+
+    assert response.status_code == 403
+
+
+def test_speak_with_a_screenshot_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    response = safe_client.post(
+        "/voice/speak",
+        json={"idle_seconds": 300, "screenshot_png": PNG_B64},
+        headers=auth,
+    )
+
+    assert response.status_code == 403
+
+
+def test_line_without_a_screenshot_passes_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # スクショを含まない /voice/line は「撮る」機能を使わないので通す。
+    monkeypatch.setattr(voice_router, "fallback_line", _fixed_fallback)
+    _install(safe_client, _StubVoicevox())
+
+    response = safe_client.post("/voice/line", json={"idle_seconds": 300}, headers=auth)
+
+    assert response.status_code == 200
+    assert response.json()["text"] == _FIXED_LINE
+    assert response.json()["fallback_reason"] == "固定文言(スクショ無し)"

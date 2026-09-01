@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from device_bridge.daemon.auth import verify_token
+from device_bridge.daemon.safety import require_feature
 from device_bridge.voice.context import (
     Escalation,
     IPhoneState,
@@ -75,6 +76,7 @@ async def make_line(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     """状況からセリフを 1 本作る。読み上げはしない。"""
     context = _parse_context(body)
     screenshot = _parse_screenshot(body)
+    _reject_if_screenshot_off(request, screenshot)
     try:
         async with asyncio.timeout(SPEAK_DEADLINE_SECONDS):
             line, reading, screen_error = await _generate(request.app.state, context, screenshot)
@@ -90,7 +92,11 @@ async def make_line(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@router.post("/screen")
+@router.post(
+    "/screen",
+    # 画面を読むこと自体が「画面を撮る」の一部なので、サムネイルが要らない要求でも拒否する。
+    dependencies=[Depends(require_feature("iphone_screenshot"))],
+)
 async def read_screen(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     """スクショから画面の読み取りだけを行う。セリフも音声も作らない。
 
@@ -129,6 +135,7 @@ async def speak(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     """
     context = _parse_context(body)
     screenshot = _parse_screenshot(body)
+    _reject_if_screenshot_off(request, screenshot)
     started = time.monotonic()
 
     try:
@@ -229,6 +236,18 @@ def _screen_payload(reading: ScreenReading | None) -> dict[str, Any] | None:
         "activity": reading.activity,
         "category": str(reading.category),
     }
+
+
+def _reject_if_screenshot_off(request: Request, screenshot: bytes | None) -> None:
+    """スクショを送ってきたのに「画面を撮る」が OFF なら 403 を投げる。
+
+    ``/voice/line`` と ``/voice/speak`` はスクショ無しでも意味がある(カメラ経路・
+    固定文言)。含まれていないなら従来どおり通し、含まれているときだけ拒否する。
+    スクショを黙って捨てて続行してはいけない。
+    """
+    if screenshot is not None:
+        # Endpoint の dependencies と同じ判定を、body を読んだ後にかける。
+        require_feature("iphone_screenshot")(request)
 
 
 def _parse_screenshot(body: dict[str, Any]) -> bytes | None:

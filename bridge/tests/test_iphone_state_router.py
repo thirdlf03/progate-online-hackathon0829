@@ -16,6 +16,7 @@ from device_bridge.commands.iphone_state import IphoneStateSnapshot
 from device_bridge.daemon.app import create_app
 from device_bridge.daemon.config import DaemonConfig
 from device_bridge.daemon.routers import iphone_state as iphone_state_router
+from device_bridge.daemon.safety import SafetyState
 
 
 class NeverFoundSource:
@@ -72,6 +73,16 @@ def test_get_state_starts_monitor_at_most_once(client: TestClient, auth: dict[st
     app.state.iphone_state_stop.set()
 
 
+def test_get_state_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    # 既定(全 OFF)では観測を始めること自体を拒否する。監視タスクも立ち上がらない。
+    response = safe_client.get("/iphone/state", headers=auth)
+
+    assert response.status_code == 403
+    assert "iPhone を見張る" in response.json()["detail"]
+
+
 async def test_lifespan_stops_the_monitor(auth: dict[str, str]) -> None:
     """デーモンの終了で監視タスクが片付くこと。残ると再接続待ちでプロセスが終わりきらない。
 
@@ -79,6 +90,9 @@ async def test_lifespan_stops_the_monitor(auth: dict[str, str]) -> None:
     lifespan だけを同じループの中で開け閉めして確かめる。
     """
     app = create_app(DaemonConfig(token=auth["X-Mihari-Token"]))
+    # セーフティーが全 OFF のままだと ``/iphone/state`` が 403 になり監視が起きないので、
+    # このテストに限って ON にする(ここで確かめたいのは監視タスクの後片付けそのもの)。
+    app.state.safety = SafetyState.all_enabled()
 
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
