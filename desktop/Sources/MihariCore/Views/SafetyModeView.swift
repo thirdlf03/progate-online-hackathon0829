@@ -64,7 +64,6 @@ public struct SafetyModeView: View {
                 .padding(.vertical, 12)
                 .background(.bar)
         }
-        .background(.bar)
     }
 
     // MARK: - 固定ヘッダー
@@ -79,6 +78,8 @@ public struct SafetyModeView: View {
                 )
                 .font(.title2.bold())
                 .foregroundStyle(Self.modeColor(for: safety.mode))
+                // モードが変わるとき、色とアイコンだけ 0.15 秒で滑らかに切り替える。
+                .animation(.easeInOut(duration: 0.15), value: safety.mode)
 
                 Spacer()
 
@@ -100,9 +101,9 @@ public struct SafetyModeView: View {
                 .lineLimit(1)
 
             indicators
+                // インジケータの色もモードが変わるときだけ 0.15 秒で滑らかにする。
+                .animation(.easeInOut(duration: 0.15), value: safety.mode)
         }
-        // 色とインジケータだけ 0.15 秒で滑らかに切り替える(子が落ちる瞬間は動かさない)。
-        .animation(.easeInOut(duration: 0.15), value: safety.mode)
     }
 
     /// 7 個のインジケータ。ON = アクセント、OFF = 薄いグレー、
@@ -175,7 +176,7 @@ public struct SafetyModeView: View {
                 HStack(alignment: .bottom, spacing: 0) {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.3))
-                        .frame(width: 2, height: 14)
+                        .frame(width: 2, height: 12)
                     Rectangle()
                         .fill(Color.secondary.opacity(0.3))
                         .frame(width: 22, height: 2)
@@ -197,7 +198,7 @@ public struct SafetyModeView: View {
 
                 cardBody(for: feature)
                     .padding(.leading, 24)
-                    .opacity(isWatching ? 1 : 0.5)
+                    .opacity(0.5)
             }
         } else {
             cardBody(for: feature)

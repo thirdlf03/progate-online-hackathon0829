@@ -68,7 +68,7 @@ struct PetContextMenuTests {
     @Test("「設定…」は Discord 設定の直前に並ぶ")
     func settingsItemSitsRightBeforeDiscordSettings() throws {
         // 実機の表示設定をテスト同士で共有しないよう、実行のたびに空の UserDefaults を使う。
-        let suiteName = "mihari.test.petContextMenu.\\(UUID().uuidString)"
+        let suiteName = "mihari.test.petContextMenu.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let presenter = LivePetPresenter(controller: PetController(defaults: defaults))
         let actions = StubPetMenuActions()
