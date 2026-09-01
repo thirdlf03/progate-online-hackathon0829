@@ -48,15 +48,27 @@ public final class CameraCaptureService: @unchecked Sendable {
     private var activeDelegate: PhotoCaptureDelegate?
 
     private let checkPermission: @Sendable () -> PermissionState
+    /// OFF の間はカメラに一切触れないための判定口。既定は .allowAll(旧挙動)。
+    private let gate: SafetyGate
 
-    /// - Parameter checkPermission: 権限状態の照会。テストでは差し替えて、
-    ///   実機のカメラ権限に依存せず「未許可時に落ちないこと」を検証する。
-    public init(checkPermission: @escaping @Sendable () -> PermissionState = { PermissionChecker.check(.camera) }) {
+    /// - Parameters:
+    ///   - checkPermission: 権限状態の照会。テストでは差し替えて、
+    ///     実機のカメラ権限に依存せず「未許可時に落ちないこと」を検証する。
+    ///   - gate: 機能トグルの判定口。`captureSinglePhoto()` の先頭で `.macCamera` を確認する。
+    public init(
+        checkPermission: @escaping @Sendable () -> PermissionState = { PermissionChecker.check(.camera) },
+        gate: SafetyGate = .allowAll
+    ) {
         self.checkPermission = checkPermission
+        self.gate = gate
     }
 
     /// 1 枚撮影し、生の画像データ(JPEG 相当)を返す。
     public func captureSinglePhoto() async throws -> Data {
+        // トグルが OFF なら権限の確認より先に返す。OFF の間はカメラに触れない
+        // (緑ランプを点けず、権限ダイアログも出さない)のが要件。
+        try gate.check(.macCamera)
+
         let permission = checkPermission()
         guard permission.grant == .granted else {
             throw CaptureError.cameraPermissionNotGranted(detail: permission.detail)

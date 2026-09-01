@@ -23,7 +23,7 @@ public enum PetMenuEntries {
         presenter: LivePetPresenter
     ) -> [PetMenuEntry] {
         let pet = presenter.controller
-        return [
+        var entries: [PetMenuEntry] = [
             .item(
                 title: actions.isWatching ? "監視を止める" : "監視を再開する",
                 action: {
@@ -83,11 +83,18 @@ public enum PetMenuEntries {
                 isChecked: actions.isPhotobombEnabled,
                 action: { actions.setPhotobombEnabled(!actions.isPhotobombEnabled) }
             ),
-            .separator,
-            .submenu(
-                title: "デバッグ",
-                entries: PetDebugMenuEntries.make(actions: actions, presenter: presenter)
-            ),
         ]
+        // デバッグメニューは開発中だけ出す。一般ユーザーの右クリックから消すのと同時に、
+        // その直前の区切り線も消して「実在しない見た目の項目」を残さない。
+        if actions.isDebugMenuVisible {
+            entries.append(.separator)
+            entries.append(
+                .submenu(
+                    title: "デバッグ",
+                    entries: PetDebugMenuEntries.make(actions: actions, presenter: presenter)
+                )
+            )
+        }
+        return entries
     }
 }

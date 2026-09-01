@@ -47,4 +47,34 @@ struct PetMenuEntriesTests {
         )
         #expect(disabled.isChecked == false)
     }
+
+    @Test("デバッグメニューは isDebugMenuVisible == false ならサブメニューごと出ない")
+    func debugSubmenuDisappearsWhenHidden() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+        actions.isDebugMenuVisible = false
+
+        let entries = PetMenuEntries.make(actions: actions, presenter: presenter)
+
+        // 「デバッグ」サブメニューと、その直前の区切り線が一緒に消える。
+        let hasDebugSubmenu = entries.contains { entry in
+            if case .submenu(let title, _) = entry { return title == "デバッグ" }
+            return false
+        }
+        #expect(!hasDebugSubmenu)
+        let separatorCount = entries.reduce(into: 0) { count, entry in
+            if case .separator = entry { count += 1 }
+        }
+        // (監視 / 在席 / 休憩)と(Discord / 権限)の区切り 2 本だけになる。
+        #expect(separatorCount == 2)
+
+        // 見える設定なら(既定どおり)デバッグサブメニューが最後に付く。
+        let visible = StubPetMenuActions()
+        let visibleEntries = PetMenuEntries.make(actions: visible, presenter: presenter)
+        let last = try #require(visibleEntries.last)
+        guard case .submenu("デバッグ", _) = last else {
+            Issue.record("デバッグサブメニューが最後に付いていない")
+            return
+        }
+    }
 }

@@ -168,6 +168,16 @@ public struct DaemonClient: Sendable {
         return response.lockHours
     }
 
+    /// セーフティートグルの状態をデーモンへ伝える。
+    ///
+    /// サーバ側の受信(`POST /safety`)は #50 で実装される。それまでは失敗するだけなので、
+    /// 呼ぶ側(`AppCoordinator`)は結果を握りつぶして続ける。
+    @discardableResult
+    public func updateSafety(_ payload: SafetyDaemonPayload) async throws -> SafetyUpdateResponse {
+        // 設定変更の通知が長時間ブロックされても次の変更で再送されるので、短めに切る。
+        try await post("safety", body: payload, timeout: 10)
+    }
+
     /// iPhone の画面を 1 枚撮る。PNG のバイト列がそのまま返る。
     public func iphoneScreenshot() async throws -> Data {
         var request = try makeRequest(path: "iphone/screenshot", authenticated: true)
