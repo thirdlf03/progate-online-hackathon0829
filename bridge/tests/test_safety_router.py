@@ -51,6 +51,32 @@ def test_enabling_everything_is_reflected(client: TestClient, auth: dict[str, st
     assert client.app.state.safety == SafetyState.all_enabled()
 
 
+def test_screenshot_is_forced_off_without_presence(
+    client: TestClient, auth: dict[str, str]
+) -> None:
+    """「iPhone の画面を撮る」は「iPhone を見張る」が前提(Epic #58 の #2)。
+
+    Swift 側の上書きで前提が OFF のまま届いても、bridge 側で OFF に倒して
+    ``/iphone/screenshot`` を拒否すること。
+    """
+    payload = {
+        "features": {
+            "iphonePresence": False,
+            "iphoneScreenshot": True,
+            "discordExposure": False,
+        }
+    }
+
+    response = client.post("/safety", json=payload, headers=auth)
+
+    assert response.status_code == 200
+    assert client.app.state.safety == SafetyState()
+    # 正規化後の値を返すこと。前提が OFF なのに ON と見えてはいけない。
+    body = client.get("/health", headers=auth).json()
+    assert body["safety"]["iphoneScreenshot"] is False
+    assert client.post("/iphone/screenshot", headers=auth).status_code == 403
+
+
 def test_health_reports_the_safety_state(client: TestClient, auth: dict[str, str]) -> None:
     # デバッグ用の表示。キーは Swift 側と共有する camelCase のまま出す。
     client.post("/safety", json=_ALL_OFF, headers=auth)

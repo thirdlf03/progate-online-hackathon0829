@@ -61,15 +61,39 @@ def test_publish_endpoint_reports_subscriber_count(
     client: TestClient, auth: dict[str, str]
 ) -> None:
     response = client.post(
-        "/events/publish", json={"name": "test", "payload": {"a": 1}}, headers=auth
+        "/events/publish", json={"name": "test.ping", "payload": {"a": 1}}, headers=auth
     )
     assert response.status_code == 200
-    assert response.json() == {"published": True, "name": "test", "subscribers": 0}
+    assert response.json() == {"published": True, "name": "test.ping", "subscribers": 0}
 
 
 def test_publish_endpoint_tolerates_a_missing_payload(
     client: TestClient, auth: dict[str, str]
 ) -> None:
-    response = client.post("/events/publish", json={}, headers=auth)
+    response = client.post("/events/publish", json={"name": "test.ping"}, headers=auth)
     assert response.status_code == 200
-    assert response.json()["name"] == "message"
+    assert response.json() == {"published": True, "name": "test.ping", "subscribers": 0}
+
+
+def test_publish_endpoint_rejects_events_outside_the_test_namespace(
+    client: TestClient, auth: dict[str, str]
+) -> None:
+    """接続確認用の口からセーフティー対象のイベントを流せないこと。
+
+    ``iphone.state`` は本来 ``iphone_state._publish`` が「iPhone を見張る」の
+    判定を通してから流すもの。ここから流せると判定を迂回できてしまう。
+    セーフティーが全 ON の ``client`` でも塞がっていることを確かめる。
+    """
+    response = client.post(
+        "/events/publish", json={"name": "iphone.state", "payload": {}}, headers=auth
+    )
+
+    assert response.status_code == 403
+    assert "iphone.state" in response.json()["detail"]
+
+
+def test_publish_endpoint_rejects_a_missing_name(client: TestClient, auth: dict[str, str]) -> None:
+    # 名前を省くと既定の "message" になるが、これも接続確認用の名前ではない。
+    response = client.post("/events/publish", json={}, headers=auth)
+
+    assert response.status_code == 403

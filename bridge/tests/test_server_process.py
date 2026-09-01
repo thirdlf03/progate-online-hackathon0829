@@ -96,14 +96,14 @@ def test_published_event_reaches_the_sse_stream(daemon: Daemon) -> None:
 
             published = httpx.post(
                 f"{daemon.base_url}/events/publish",
-                json={"name": "watch.start", "payload": {"at": "19:00"}},
+                json={"name": "test.watch", "payload": {"at": "19:00"}},
                 headers=daemon.auth,
                 timeout=STARTUP_TIMEOUT,
             )
             assert published.json()["subscribers"] == 1
 
             event = _read_event(lines)
-            assert event["name"] == "watch.start"
+            assert event["name"] == "test.watch"
             assert event["payload"] == {"at": "19:00"}
 
 

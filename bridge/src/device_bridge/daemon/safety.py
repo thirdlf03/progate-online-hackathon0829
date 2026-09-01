@@ -10,15 +10,21 @@ Swift 側(#49)が機能の入口で判定していても、Swift にバグがあ
 
 一度も ``POST /safety`` が来ていない間の既定は全 OFF(= 全て拒否)。Swift がまだ
 起動していないのにデーモンだけが動いても、OFF の機能は一切動かない。
+
+「iPhone の画面を撮る」は「iPhone を見張る」が前提(Epic #58)。前提が OFF のまま
+``iphoneScreenshot: true`` が届いても、受け取った時点で OFF に正規化する。
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException, Request, status
+
+logger = logging.getLogger(__name__)
 
 #: 機能名 → 表示名。403 の理由に載せる。想定外の名前は Factory の時点で KeyError に落ちる。
 FEATURE_LABELS: dict[str, str] = {
@@ -51,7 +57,12 @@ class SafetyState:
 
     @classmethod
     def from_payload(cls, features: dict[str, Any]) -> SafetyState:
-        """Swift が送ってくる camelCase の辞書から作る。検証込み。
+        """Swift が送ってくる camelCase の辞書から作る。検証と正規化込み。
+
+        「iPhone の画面を撮る」は「iPhone を見張る」が前提なので、前提が OFF の
+        組み合わせで届いたら OFF に倒す(Swift 側の ``normalized()`` と同じ意味)。
+        環境変数での上書きなどで矛盾した組み合わせが届いても、bridge 側だけで
+        前提を守れるようにしておく。
 
         :raises ValueError: キーの欠け・型違いなど、契約に合わないとき。
         """
@@ -66,6 +77,9 @@ class SafetyState:
             if not isinstance(raw, bool):
                 raise ValueError(f"{key} は bool でなければならない")
             values[attribute] = raw
+        if values["iphone_screenshot"] and not values["iphone_presence"]:
+            logger.info("iphonePresence が OFF なので iphoneScreenshot も OFF に正規化した")
+            values["iphone_screenshot"] = False
         return cls(**values)
 
     def to_payload(self) -> dict[str, bool]:

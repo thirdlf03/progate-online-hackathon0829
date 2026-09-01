@@ -32,7 +32,7 @@ async def update_safety(request: Request, body: dict[str, Any]) -> dict[str, Any
         state = SafetyState.from_payload(body.get("features"))
     except (TypeError, ValueError) as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"セーフティー設定の形が不正: {error}",
         ) from error
 
