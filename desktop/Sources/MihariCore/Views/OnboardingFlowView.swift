@@ -53,7 +53,10 @@ public struct OnboardingFlowView: View {
                     context: .onboarding(onNext: goToPermissionsStep),
                     onFeatureEnabled: { feature in
                         Task { await enableFeature(feature) }
-                    }
+                    },
+                    // オンボーディングにはアンインストールの入り口を置かない。#55
+                    onUninstall: nil,
+                    canUninstall: false
                 )
                 .transition(.move(edge: .leading))
             case .permissions:

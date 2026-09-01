@@ -67,6 +67,8 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     public var isPhotobombEnabled: Bool {
         safety.isEnabled(.photobomb)
     }
+    /// アンインストールの進行中か。終了確認(`confirmQuit`)を素通しするためのフラグ。#55
+    public private(set) var isUninstalling = false
 
     /// 在席スタンプのカットインを出す層。
     private let cutIn: AttendanceCutInPresenting = AttendanceCutInPresenter()
@@ -98,8 +100,6 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     private let statusPanel = StatusPanelController()
     /// 監視中はディスプレイ/システムのアイドルスリープを止める。
     private let sleepPreventer: SleepPreventing
-    /// 起動してから何時間かは終了そのものを受け付けない。
-    private var quitTimeLock = QuitTimeLock()
     /// `quitTimeLock` に渡す既定のロック時間。デーモン(Discord の `/watch lock`)から
     /// 取れなかったときのフォールバック。
     private static let defaultLockHours: Double = 4
@@ -112,6 +112,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     private let watchdogRegistrar: WatchdogRegistering
     /// 前回、正常に終了できていたか(kill されて起こされたのかを見分けるため)。
     private let lifecycleMarker: AppLifecycleMarking
+    /// 起動してからの終了ロック。`begin()` の経路でセットされ、ロックが解けるまで
+    /// 終了とアンインストールを拒む。#55 の `canUninstall` もここを見る。
+    private var quitTimeLock: QuitTimeLock
     private var cancellables: Set<AnyCancellable> = []
     /// すでに見張り始めたか。`begin()` を何度呼んでも 1 回しか効かないようにする。
     private var hasBegun = false
@@ -136,13 +139,16 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     ///   - lifecycleMarker: 前回の終了が正常だったかの記録。テストでは固定値を返すスタブに差し替える。
     ///   - safety: セーフティートグルの設定。テストでは `UserDefaults(suiteName:)` の store を渡す。
     ///   - defaults: quitLock の解除時刻などの保存先。テストでは `UserDefaults(suiteName:)` を渡す。
+    ///   - quitTimeLock: 終了ロックの本体。テストではロック済みのインスタンスを渡して
+    ///     `canUninstall` の「ロック中は false」を確かめられるようにする。#55
     public init(
         sleepPreventer: SleepPreventing = IOPMSleepPreventer(),
         loginItemRegistrar: LoginItemRegistering = SMAppServiceLoginItemRegistrar(),
         watchdogRegistrar: WatchdogRegistering = LaunchAgentWatchdogRegistrar(),
         lifecycleMarker: AppLifecycleMarking = UserDefaultsLifecycleMarker(),
         safety: SafetySettingsStore = SafetySettingsStore(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        quitTimeLock: QuitTimeLock = QuitTimeLock()
     ) {
         let player = SpeechPlayer()
         let attendance = AttendanceModel()
@@ -161,6 +167,7 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         self.watchdogRegistrar = watchdogRegistrar
         self.lifecycleMarker = lifecycleMarker
         self.defaults = defaults
+        self.quitTimeLock = quitTimeLock
         observeVoiceMode()
     }
 
@@ -295,6 +302,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     ///
     /// - Parameter interactive: ユーザーが画面から操作した終了か。シグナル経由なら false。
     public func confirmQuit(interactive: Bool) async -> Bool {
+        // アンインストールの流れは確認を挟み終えているので、素通しする。
+        // ここで止まると、消したはずのファイルと登録を残したままアプリが残る。
+        if isUninstalling { return true }
         guard hasBegun else { return true }
 
         if safety.isEnabled(.quitLock) {
@@ -331,6 +341,85 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         loginItemRegistrar.unregister()
         lifecycleMarker.markGracefulShutdown()
         return true
+    }
+
+    // MARK: - アンインストール (#55)
+
+    /// 終了ロック中か。quitLock トグルが ON でも、解除時刻が過ぎていればロック中ではない。
+    ///
+    /// `quitTimeLock` は `begin()` 以降にしかセットされない(初期値は無ロック)ので、
+    /// `hasBegun` の検査は不要。[#52] の `isWatchingForSafety` は「監視外でもロック中は監視中として
+    /// 扱う」文脈なので `hasBegun` を見ているが、こちらは quitLock トグルが ON であることを
+    /// 外側の条件で確かめるため、ロックの本体だけで判定できる。
+    private var isQuitLocked: Bool {
+        !quitTimeLock.isUnlocked()
+    }
+
+    /// アンインストールできるか。quitLock が ON のロック中は、アンインストールの確認を
+    /// 出せない(終了ブロックの抜け道にしないため)。設定画面のボタンの押下可否と
+    /// `uninstall()` の二重ガードが同じ判定を見る。
+    public var canUninstall: Bool {
+        !(safety.isEnabled(.quitLock) && isQuitLocked)
+    }
+
+    /// アンインストールを始める。設定画面の「Mihari をアンインストール…」から呼ばれる。
+    ///
+    /// 確認ダイアログで OK が出たら、見張りとデーモンを止めて `Uninstaller` に消す作業を
+    /// 任せる。失敗があれば手動の手順を示し、いずれにせよ終了する。
+    /// `canUninstall == false`(quitLock が ON のロック中)なら何もしない。
+    public func uninstall() {
+        guard canUninstall else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Mihari をアンインストールします"
+        // 消えるものを箇条書きで見せてから、破壊的な操作の確認を 1 枚だけ出す。
+        let bullets = UninstallStep.allCases.map(\.title).joined(separator: "\n")
+        alert.informativeText = "次のものを削除します。この操作は取り消せません:\n\(bullets)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "アンインストール")
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.addButton(withTitle: "やめる")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        isUninstalling = true
+        Task { [weak self] in
+            guard let self else { return }
+            // 消している最中に検知・写り込み・デーモンが動き続けないように止める。
+            detection.stop()
+            photobombWatcher.stop()
+            daemon.stop()
+            // watchdog を見直すループを止めないと、`Uninstaller` が消した直後に登録を
+            // 引き戻して「消したのに残る」になる。
+            watchdogReassertionTask?.cancel()
+            watchdogReassertionTask = nil
+
+            let report = await Uninstaller(
+                watchdog: watchdogRegistrar,
+                loginItem: loginItemRegistrar,
+                tunneld: tunneld
+            ).run()
+
+            if !report.failed.isEmpty {
+                showUninstallFailure(report)
+            }
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// アンインストールに失敗したステップを、手動の手順と一緒にダイアログで知らせる。
+    private func showUninstallFailure(_ report: UninstallReport) {
+        let details = report.failed
+            .map { "• \($0.step.title): \($0.reason)" }
+            .joined(separator: "\n")
+        let alert = NSAlert()
+        alert.messageText = "アンインストールが完了しませんでした"
+        alert.informativeText =
+            "次の項目を消せませんでした:\n\(details)\n\n"
+            + "手動で削除するには、以下のコマンドを Terminal で実行してください:\n"
+            + report.manualInstructions
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "閉じる")
+        alert.runModal()
     }
 
     // MARK: - quitLock トグルと執行猶予脱出 (#52)
@@ -1161,17 +1250,30 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 @MainActor
 private struct SafetySettingsHost: View {
     @ObservedObject var coordinator: AppCoordinator
+    /// quitLock トグルなど設定の変化で `canUninstall` / `isWatching` を再評価するための
+    /// 観察対象。`SafetyModeView` 自身も `safety` を観察して body を作り直されるが、
+    /// init で受け取った `canUninstall` の値はホストが body を作り直さないと更新されない。
+    @ObservedObject private var safety: SafetySettingsStore
+
+    init(coordinator: AppCoordinator) {
+        self.coordinator = coordinator
+        safety = coordinator.safety
+    }
 
     var body: some View {
         SafetyModeView(
-            safety: coordinator.safety,
+            safety: safety,
             isWatching: coordinator.isWatchingForSafety,
             context: .settings(onClose: { [weak coordinator] in
                 coordinator?.closeSafety()
             }),
             onFeatureEnabled: { [weak coordinator] feature in
                 coordinator?.handleFeatureEnabled(feature)
-            }
+            },
+            onUninstall: { [weak coordinator] in
+                coordinator?.uninstall()
+            },
+            canUninstall: coordinator.canUninstall
         )
     }
 }

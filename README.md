@@ -324,3 +324,29 @@ Gemini に見せて「何のアプリで何をしているか」に触れたセ�
 ## 注意
 
 iOS 17+ の developer 系機能を使う場合は、別途 tunneld(root 権限が必要)の起動が必要になる。
+
+## アンインストール
+
+「設定」画面(メニューバー「ペット」またはペットの右クリックメニューの最上段、
+モード表示の行を押す)の右下にある **「Mihari をアンインストール…」** から、
+アプリ自身が常駐の仕掛けをまとめて消して終了できる。
+
+- 確認ダイアログに「削除するもの」の一覧が出る。「アンインストール」で実行する
+- 消す対象: 監視プロセスの LaunchAgent(`~/Library/LaunchAgents/com.thirdlf03.mihari.watchdog.plist`)、
+  tunneld の LaunchDaemon(`/Library/LaunchDaemons/com.thirdlf03.mihari.tunneld.plist`、管理者パスワードが 1 回要る)、
+  ログイン項目、執行猶予脱出の記録(`escape.json`)、設定ディレクトリ(`~/.mihari`)、
+  UserDefaults、アプリ本体(`Mihari.app` をゴミ箱へ)
+- quitLock が ON のロック中は押せない(終了ブロックの抜け道にしないため)。ロックが解けてからやり直す
+- 失敗した項目があると、1 つずつ理由と手動の手順が表示される
+
+アプリから消し切れなかった場合の手動手順(表示されるダイアログと同じ内容):
+
+```sh
+launchctl bootout gui/$(id -u)/com.thirdlf03.mihari.watchdog
+sudo launchctl bootout system/com.thirdlf03.mihari.tunneld
+rm -rf ~/.mihari
+defaults delete com.thirdlf03.mihari
+```
+
+`make kill` は開発中に起動中のプロセスを止めるだけのもので、常駐の登録
+(LaunchAgent / LaunchDaemon / ログイン項目)は残る。アンインストールには使わない。
