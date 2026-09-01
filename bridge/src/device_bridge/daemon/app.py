@@ -20,7 +20,6 @@ from device_bridge.daemon.routers import (
 )
 from device_bridge.discord_bot.bot import DiscordService
 from device_bridge.discord_bot.scheduler import WatchScheduler
-from device_bridge.voice.generator import LineGenerator
 from device_bridge.voice.screen_reader import ScreenReader
 from device_bridge.voice.voicevox import VoicevoxClient
 
@@ -54,7 +53,6 @@ def create_app(config: DaemonConfig) -> FastAPI:
     )
     app.state.config = config
     app.state.events = EventBus()
-    app.state.line_generator = LineGenerator()
     app.state.screen_reader = ScreenReader()
     app.state.voicevox = VoicevoxClient()
     app.state.watch_scheduler = WatchScheduler(app.state.events)
