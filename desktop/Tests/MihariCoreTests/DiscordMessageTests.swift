@@ -125,6 +125,20 @@ struct DiscordMessageTests {
         }
     }
 
+    @Test("証拠を撮らない設定なら、1 行目は noEvidencePool から選ばれる")
+    func noEvidenceHeadlineComesFromItsOwnPool() {
+        let pool = [
+            "写真も画面も撮らない設定にしてるんだね。でも、サボってたのは分かってる。",
+            "撮らないでって頼まれたから撮らないよ。その代わり、ずっと待ってたことはみんなに言うね。",
+            "証拠は残さない約束にしてるんだった。それでも、私が数えてた時間は消えないよ。",
+            "カメラもスマホも使わないでいても、気づかないと思った?手が止まってたんだよ。",
+        ]
+        for seed in UInt64(0)..<16 {
+            let message = compose(facts(evidence: .none, iphone: .unreachable), seed: seed)
+            #expect(pool.contains { message.contains($0) })
+        }
+    }
+
     @Test("2 行目には、当てはまる事実だけを並べる")
     func subtextListsOnlyWhatApplies() {
         let message = compose(

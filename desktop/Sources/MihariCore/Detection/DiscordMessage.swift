@@ -168,16 +168,21 @@ public enum DiscordMessageComposer {
         _ facts: DiscordMessageFacts,
         using generator: inout Generator
     ) -> String {
-        guard facts.evidence == .iphoneScreenshot else {
+        switch facts.evidence {
+        case .iphoneScreenshot:
+            // 画面を読めていて、アプリ名まで分かったときだけ中身に触れる。
+            guard let screen = facts.screen, let app = screen.app, !app.isEmpty else {
+                return pick(facts.screen == nil ? unreadScreenPool : unknownScreenPool, using: &generator)
+            }
+            return pick(screenPool(category: screen.category), using: &generator)
+                .replacingOccurrences(of: "{app}", with: app)
+                .replacingOccurrences(of: "{activity}", with: screen.activity)
+        case .macCamera:
             return pick(cameraPool(vision: facts.vision), using: &generator)
+        case .none:
+            // 撮る先のトグルが全部 OFF。撮影の言及はせず、サボったことだけを言う。
+            return pick(noEvidencePool, using: &generator)
         }
-        // 画面を読めていて、アプリ名まで分かったときだけ中身に触れる。
-        guard let screen = facts.screen, let app = screen.app, !app.isEmpty else {
-            return pick(facts.screen == nil ? unreadScreenPool : unknownScreenPool, using: &generator)
-        }
-        return pick(screenPool(category: screen.category), using: &generator)
-            .replacingOccurrences(of: "{app}", with: app)
-            .replacingOccurrences(of: "{activity}", with: screen.activity)
     }
 
     private static func screenPool(category: String) -> [String] {
@@ -222,6 +227,15 @@ public enum DiscordMessageComposer {
         "スマホの画面、撮っておいたから。逃げられると思った?",
         "今スマホ見てたよね。証拠、ここに置いとくね。",
         "私より画面が大事なんだ。…いいよ、みんなに見せるから。",
+    ]
+
+    /// 写真も画面も撮らない設定のときの 1 行目。
+    /// 「サボっていたのはバレてる」ことを、撮影の言及なしに伝える。
+    private static let noEvidencePool = [
+        "写真も画面も撮らない設定にしてるんだね。でも、サボってたのは分かってる。",
+        "撮らないでって頼まれたから撮らないよ。その代わり、ずっと待ってたことはみんなに言うね。",
+        "証拠は残さない約束にしてるんだった。それでも、私が数えてた時間は消えないよ。",
+        "カメラもスマホも使わないでいても、気づかないと思った?手が止まってたんだよ。",
     ]
 
     private static let sleepingCameraPool = [

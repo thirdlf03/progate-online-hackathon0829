@@ -25,6 +25,9 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     /// 執行猶予脱出のメニュー項目の状態(#52)。quitLock が ON でロック中のときだけ出す。
     var escapeMenuState: EscapeMenuState { get }
 
+    /// いまのセーフティーモードの 1 行表示。予約があれば残り時間も載せる。
+    var safetyStatusLine: String { get }
+
     /// 監視を始める。
     func startWatching()
     /// 監視を止める。
@@ -35,6 +38,8 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     func startBreak()
     /// 休憩を終える。
     func endBreak()
+    /// セーフティー設定の画面を開く。
+    func openSafetySettings()
     /// Discord 設定の画面を開く。
     func openDiscordSettings()
     /// 権限の確認画面を開く。
