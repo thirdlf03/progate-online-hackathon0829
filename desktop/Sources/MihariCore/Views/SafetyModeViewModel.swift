@@ -53,20 +53,49 @@ public enum SafetyModeViewModel {
         )
     }
 
-    /// 予約帯の文言。「9/2 14:30 に OFF になります」の形。
-    public static func pendingStatusText(effectiveAt: Date) -> String {
-        "\(pendingTimeText(effectiveAt: effectiveAt)) に OFF になります"
+    /// カードの中に出す予約バッジの文言。「9/2 14:30 に ON」の形。
+    ///
+    /// 設定画面の最下部と違って、そのカード 1 枚のことだけを言う。
+    public static func pendingFeatureText(effectiveAt: Date) -> String {
+        "\(pendingTimeText(effectiveAt: effectiveAt)) に ON"
+    }
+
+    /// 設定画面の最下部に出す予約帯の文言。予約の中身で出し分ける。
+    ///
+    /// 予約に載るのは緩める方向(機能の ON・「あとで設定を変えられるようにする」の復帰)
+    /// だけなので、どちらが載っているかで文を変える。両方なら 1 文にまとめる。
+    public static func pendingStatusText(for pending: SafetyPendingChange) -> String {
+        let time = pendingTimeText(effectiveAt: pending.effectiveAt)
+        // 表示順はトグルの並び順に合わせる(Set のままだと順序が安定しない)。
+        let names = SafetyFeature.allCases
+            .filter { pending.enabling.contains($0) }
+            .map(\.title)
+        let changeability = "「あとで設定を変えられるようにする」"
+        switch (names.isEmpty, pending.restoresChangeability) {
+        case (false, false):
+            return "\(time) に ON になります(\(names.joined(separator: ", ")))"
+        case (false, true):
+            return "\(time) に ON になります(\(names.joined(separator: ", "))、\(changeability))"
+        case (true, true):
+            return "\(time) に\(changeability)が ON に戻ります"
+        case (true, false):
+            // 中身が空の予約は積まれない(`SafetyPolicy.removing` が消す)ので、保険。
+            return "\(time) に発効します"
+        }
     }
 
     /// オンボーディングのステップ 2(権限画面)を飛ばしてよいか。
     ///
-    /// 要求すべき権限が 1 つも無く、かつ tunneld も不要(iphoneScreenshot が OFF)なら、
-    /// ステップ 2 に見せるものが無いので直ちに `onStart` する。
+    /// トグルが要求している権限が 1 つも無く、かつ tunneld も不要(iphoneScreenshot が
+    /// OFF)なら、ステップ 2 に見せるものが無いので直ちに `onStart` する。
+    ///
+    /// モーションのようにトグルと紐づかない権限(`feature == nil`)は全 OFF でも一覧に
+    /// 出るが、任意なので「見せるものがある」とは数えない。
     public static func shouldSkipPermissionsStep(
         relevantKinds: [PermissionKind],
         isIPhoneScreenshotEnabled: Bool
     ) -> Bool {
-        relevantKinds.isEmpty && !isIPhoneScreenshotEnabled
+        relevantKinds.allSatisfy { $0.feature == nil } && !isIPhoneScreenshotEnabled
     }
 
     // MARK: - 見た目の文言(design-54.md)
@@ -106,6 +135,26 @@ public enum SafetyModeViewModel {
         case .quitLock: return "終了"
         case .photobomb: return "写込"
         }
+    }
+
+    /// 従属(`requires` を持つ機能)のカードに添える 1 行の文言。
+    ///
+    /// 前提が OFF なら選べないので、その理由を出す。前提が予約中(発効待ちの ON に
+    /// 載っている)なら従属も同じ予約に積めるので、選べないのではなく「一緒に ON に
+    /// なる」ことを伝える。
+    ///
+    /// - Returns: 出す文言。前提が ON で添える必要が無いときは nil。
+    public static func dependencyNote(
+        isRequiredEnabled: Bool,
+        isRequiredPending: Bool
+    ) -> String? {
+        if isRequiredEnabled {
+            return nil
+        }
+        if isRequiredPending {
+            return "「iPhone を見張る」の予約と一緒に ON になります"
+        }
+        return "「iPhone を見張る」を ON にすると選べます"
     }
 
     /// カードの注意帯の文言。対象は iphoneScreenshot と quitLock の 2 本だけ。

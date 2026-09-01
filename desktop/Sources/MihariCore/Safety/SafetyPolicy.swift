@@ -31,22 +31,23 @@ public enum SafetyDecision: Equatable, Sendable {
     /// 即時に効く。`skipped` は disableAll で quitLock を残した等、依頼どおり
     /// できなかったものを積む。
     case apply(SafetySettings, skipped: [SafetyFeature])
-    /// 予約(pendingChange)を積んで 24 時間後に発効させる。
-    case schedule(SafetySettings)
+    /// 予約(pendingChange)を積んで 24 時間後に発効させる。`skipped` の意味は
+    /// `apply` と同じ(いまは予約になる経路で残すものが無いので常に空)。
+    case schedule(SafetySettings, skipped: [SafetyFeature])
     /// 拒否。何も変わらない。
     case reject(SafetyRejection)
 }
 
 /// セーフティートグルの変更可否を決める純粋ロジック。副作用なし。
 ///
-/// 合意済みのルール:
-/// - OFF 方向(安全側)は常に即時。ただし例外 2 つ:
-///   (a) `quitLock` は監視中に OFF にできない
-///   (b) `canChangeLater == false` の間は OFF も 24 時間後の予約になる
-/// - ON 方向は監視していないときだけ。`requires` が OFF なら reject
+/// 合意済みのルール(Epic #58「トグルの変更ルール」):
+/// - OFF 方向(安全側)は**常に即時**。例外は `quitLock` を監視中に OFF にできないことだけ
+/// - ON 方向(緩める)は**監視していないときだけ**。`requires` が OFF なら reject
+/// - `canChangeLater == false` の間は、ON 方向が即時ではなく **24 時間後の予約**になる。
+///   「あとで設定を変えられるようにする」を ON に戻す操作も同じく予約になる
 public enum SafetyPolicy {
 
-    /// クーリングオフ期間。`canChangeLater == false` の間の変更はここまで発効が延びる。
+    /// クーリングオフ期間。`canChangeLater == false` の間の ON はここまで発効が延びる。
     public static let coolingOffInterval: TimeInterval = 24 * 60 * 60
 
     /// 変更を受け付けるか決める。
@@ -58,18 +59,13 @@ public enum SafetyPolicy {
     ) -> SafetyDecision {
         switch change {
         case .enable(let feature):
-            return decideEnable(feature, current: current, isWatching: isWatching)
+            return decideEnable(feature, current: current, isWatching: isWatching, now: now)
         case .disable(let feature):
-            return decideDisable(feature, current: current, isWatching: isWatching, now: now)
+            return decideDisable(feature, current: current, isWatching: isWatching)
         case .enableAll:
-            if isWatching {
-                return .reject(.enablingWhileWatching)
-            }
-            var settings = current
-            settings.enabled = Set(SafetyFeature.allCases)
-            return .apply(settings, skipped: [])
+            return decideEnableAll(current: current, isWatching: isWatching, now: now)
         case .disableAll:
-            return decideDisableAll(current: current, isWatching: isWatching, now: now)
+            return decideDisableAll(current: current, isWatching: isWatching)
         case .setCanChangeLater(let enabled):
             if enabled {
                 return decideRestoreChangeability(current: current, now: now)
@@ -86,6 +82,11 @@ public enum SafetyPolicy {
 
     /// 発効時刻が来た予約を適用する。来ていなければそのまま返す。
     ///
+    /// ここでは**監視中かどうかを見ない**。ON 方向を監視中に禁じているのは「その場の
+    /// 思いつきで演出が変わる」のを防ぐためで、予約は 24 時間の熟慮を経ている。しかも
+    /// 監視は起動と同時に始まってほぼ常時続くので、監視中を理由に見送ると予約が永久に
+    /// 発効しなくなる。
+    ///
     /// 適用した結果は必ず `normalized()` を通す(予約に従属だけが入っていた等でも
     /// 不整合が残らないように)。
     public static func applyingDuePendingChange(_ settings: SafetySettings, now: Date) -> SafetySettings {
@@ -93,12 +94,7 @@ public enum SafetyPolicy {
             return settings
         }
         var result = settings
-        // 予約された機能と、その従属(iphonePresence を OFF → iphoneScreenshot も OFF)を落とす。
-        var disabling = pending.disabling
-        for feature in pending.disabling {
-            disabling.formUnion(feature.dependents)
-        }
-        result.enabled.subtract(disabling)
+        result.enabled.formUnion(pending.enabling)
         if pending.restoresChangeability {
             result.canChangeLater = true
         }
@@ -111,30 +107,57 @@ public enum SafetyPolicy {
     private static func decideEnable(
         _ feature: SafetyFeature,
         current: SafetySettings,
-        isWatching: Bool
+        isWatching: Bool,
+        now: Date
     ) -> SafetyDecision {
         // 緩める方向は、監視していないときにだけ認める。
         // 監視中に ON を許すと演出が途中で変わって「設定にない機能」が動き出すため。
         if isWatching {
             return .reject(.enablingWhileWatching)
         }
-        if let required = feature.requires, !current.enabled.contains(required) {
+        // 依存は「いま ON」だけでなく「同じ予約で ON になる予定」も満たしたとみなす。
+        // 予約中に iphonePresence → iphoneScreenshot の順で頼めるようにするため。
+        if let required = feature.requires, !effectiveEnabled(current).contains(required) {
             return .reject(.dependencyMissing(required))
+        }
+        guard current.canChangeLater else {
+            return schedule(enabling: [feature], restoresChangeability: false, over: current, now: now)
         }
         var settings = current
         settings.enabled.insert(feature)
         return .apply(settings, skipped: [])
     }
 
-    // MARK: - OFF 方向
-
-    private static func decideDisable(
-        _ feature: SafetyFeature,
+    private static func decideEnableAll(
         current: SafetySettings,
         isWatching: Bool,
         now: Date
     ) -> SafetyDecision {
-        // (a) #5 は監視中に OFF にできない。監視を外せないためのロックを外す抜け道になる。
+        if isWatching {
+            return .reject(.enablingWhileWatching)
+        }
+        guard current.canChangeLater else {
+            return schedule(
+                enabling: Set(SafetyFeature.allCases),
+                restoresChangeability: false,
+                over: current,
+                now: now
+            )
+        }
+        var settings = current
+        settings.enabled = Set(SafetyFeature.allCases)
+        return .apply(settings, skipped: [])
+    }
+
+    // MARK: - OFF 方向
+
+    /// OFF は `canChangeLater` に関係なく常に即時。予約中の ON があればそれも取り消す。
+    private static func decideDisable(
+        _ feature: SafetyFeature,
+        current: SafetySettings,
+        isWatching: Bool
+    ) -> SafetyDecision {
+        // #5 は監視中に OFF にできない。監視を外せないためのロックを外す抜け道になる。
         if feature == .quitLock, isWatching, current.enabled.contains(.quitLock) {
             return .reject(.quitLockWhileWatching)
         }
@@ -143,24 +166,15 @@ public enum SafetyPolicy {
         var disabling = Set([feature])
         disabling.formUnion(feature.dependents)
 
-        // (b) クーリングオフ中は OFF も即時ではなく 24 時間後の予約になる。
-        guard current.canChangeLater else {
-            return schedule(
-                pendingDisabling: disabling,
-                restoresChangeability: false,
-                over: current,
-                now: now
-            )
-        }
         var settings = current
         settings.enabled.subtract(disabling)
+        settings.pendingChange = removing(disabling, from: current.pendingChange)
         return .apply(settings, skipped: [])
     }
 
     private static func decideDisableAll(
         current: SafetySettings,
-        isWatching: Bool,
-        now: Date
+        isWatching: Bool
     ) -> SafetyDecision {
         var disabling = Set(SafetyFeature.allCases)
         var skipped: [SafetyFeature] = []
@@ -171,16 +185,10 @@ public enum SafetyPolicy {
             skipped = [.quitLock]
         }
 
-        guard current.canChangeLater else {
-            return schedule(
-                pendingDisabling: disabling,
-                restoresChangeability: false,
-                over: current,
-                now: now
-            )
-        }
         var settings = current
         settings.enabled.subtract(disabling)
+        // 「全部 OFF」なので、予約中の ON は quitLock を残す場合も含めて全部取り消す。
+        settings.pendingChange = removing(Set(SafetyFeature.allCases), from: current.pendingChange)
         return .apply(settings, skipped: skipped)
     }
 
@@ -195,33 +203,48 @@ public enum SafetyPolicy {
         if current.canChangeLater {
             return .apply(current, skipped: [])
         }
-        return schedule(
-            pendingDisabling: current.pendingChange?.disabling ?? [],
-            restoresChangeability: true,
-            over: current,
-            now: now
-        )
+        return schedule(enabling: [], restoresChangeability: true, over: current, now: now)
+    }
+
+    // MARK: - 予約の組み立て
+
+    /// いま ON の機能に、予約で ON になる予定の機能を足したもの。依存の判定に使う。
+    private static func effectiveEnabled(_ settings: SafetySettings) -> Set<SafetyFeature> {
+        settings.enabled.union(settings.pendingChange?.enabling ?? [])
+    }
+
+    /// 予約から `features` を取り除く。空になり、変更可否も戻さないなら予約ごと消す。
+    private static func removing(
+        _ features: Set<SafetyFeature>,
+        from pending: SafetyPendingChange?
+    ) -> SafetyPendingChange? {
+        guard var pending else { return nil }
+        pending.enabling.subtract(features)
+        if pending.enabling.isEmpty, !pending.restoresChangeability {
+            return nil
+        }
+        return pending
     }
 
     /// pendingChange に予約を積む。
     ///
-    /// 既に pending があれば `disabling` は和集合にし、`restoresChangeability` は
+    /// 既に pending があれば `enabling` は和集合にし、`restoresChangeability` は
     /// どちらかが true なら true にする。`effectiveAt` は今回の `now + coolingOffInterval`
-    /// で置き換える(発効は常に「依頼を出して 24 時間後」)。
+    /// で置き換える(発効は常に「最後に依頼を出して 24 時間後」。先に入れた予約も一緒に
+    /// 延びるが、緩める方向を遅らせる側なので安全側として許容する)。
     private static func schedule(
-        pendingDisabling: Set<SafetyFeature>,
+        enabling: Set<SafetyFeature>,
         restoresChangeability: Bool,
         over current: SafetySettings,
         now: Date
     ) -> SafetyDecision {
         var settings = current
         let previous = current.pendingChange
-        let pending = SafetyPendingChange(
-            disabling: (previous?.disabling ?? []).union(pendingDisabling),
+        settings.pendingChange = SafetyPendingChange(
+            enabling: (previous?.enabling ?? []).union(enabling),
             restoresChangeability: (previous?.restoresChangeability ?? false) || restoresChangeability,
             effectiveAt: now.addingTimeInterval(coolingOffInterval)
         )
-        settings.pendingChange = pending
-        return .schedule(settings)
+        return .schedule(settings, skipped: [])
     }
 }

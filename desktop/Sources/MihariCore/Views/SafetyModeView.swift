@@ -177,11 +177,14 @@ public struct SafetyModeView: View {
         }
     }
 
-    /// 1 枚のカード。依存で無効(iphonePresence が OFF のときの iphoneScreenshot)は
-    /// 親カードの下辺から吊り線でぶら下がる形にする。
+    /// 1 枚のカード。前提がまだ ON でない従属(iphonePresence が ON でないときの
+    /// iphoneScreenshot)は、親カードの下辺から吊り線でぶら下がる形にする。
+    ///
+    /// 前提が予約中なら従属も同じ予約に積めるので、吊り線と 1 行の説明は出すが、
+    /// 沈めない(押せるカードなので)。
     @ViewBuilder
     private func card(for feature: SafetyFeature) -> some View {
-        if isDependencyDisabled(feature) {
+        if let note = dependencyNote(for: feature) {
             VStack(alignment: .leading, spacing: 0) {
                 // 吊り線: 親カードの下辺から縦 12pt、横 22pt。カード間の 12pt をまたいで
                 // 親の下辺に届くよう、ブロックの上端から 12pt 上へずらし、横線はカードの
@@ -198,20 +201,17 @@ public struct SafetyModeView: View {
                 .offset(y: -12)
 
                 if !isWatching {
-                    // この行だけ opacity 1(カード本体は 0.5 で沈める)。
-                    Label(
-                        "「iPhone を見張る」を ON にすると選べます",
-                        systemImage: "arrow.turn.down.right"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 30)
-                    .padding(.bottom, 4)
+                    // この行だけ opacity 1(選べないときのカード本体は 0.5 で沈める)。
+                    Label(note, systemImage: "arrow.turn.down.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 30)
+                        .padding(.bottom, 4)
                 }
 
                 cardBody(for: feature)
                     .padding(.leading, 24)
-                    .opacity(0.5)
+                    .opacity(isDependencyDisabled(feature) ? 0.5 : 1)
             }
         } else {
             cardBody(for: feature)
@@ -296,21 +296,18 @@ public struct SafetyModeView: View {
                 .foregroundStyle(.orange)
         }
         if case .settings = context, let pending = safety.settings.pendingChange,
-            pending.disabling.contains(feature)
+            pending.enabling.contains(feature)
         {
-            pendingBand(effectiveAt: pending.effectiveAt) {
+            pendingBand(text: SafetyModeViewModel.pendingFeatureText(effectiveAt: pending.effectiveAt)) {
                 _ = safety.request(.cancelPendingChange, isWatching: isWatching)
             }
         }
     }
 
     /// 予約帯(取り消しボタン付き)。カード内と設定画面の最下部で同じ見た目にする。
-    private func pendingBand(effectiveAt: Date, onCancel: @escaping () -> Void) -> some View {
+    private func pendingBand(text: String, onCancel: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
-            Label(
-                SafetyModeViewModel.pendingStatusText(effectiveAt: effectiveAt),
-                systemImage: "clock"
-            )
+            Label(text, systemImage: "clock")
             Spacer()
             Button("取り消す", action: onCancel)
                 .controlSize(.small)
@@ -323,9 +320,12 @@ public struct SafetyModeView: View {
     /// 設定画面の最下部の予約帯。カードの予約帯より上に「取り消す」の意味を
     /// 1 本にまとめたいときは閉じる側でカード側を隠すこともできるが、design-54.md は
     /// 両方出す形なのでそのままにする。
+    @ViewBuilder
     private var bottomPendingBand: some View {
-        pendingBand(effectiveAt: safety.settings.pendingChange?.effectiveAt ?? Date()) {
-            _ = safety.request(.cancelPendingChange, isWatching: isWatching)
+        if let pending = safety.settings.pendingChange {
+            pendingBand(text: SafetyModeViewModel.pendingStatusText(for: pending)) {
+                _ = safety.request(.cancelPendingChange, isWatching: isWatching)
+            }
         }
     }
 
@@ -337,16 +337,27 @@ public struct SafetyModeView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("あとで設定を変えられるようにする")
                     .font(.body)
-                Text(
-                    safety.settings.canChangeLater
-                        ? "いつでも設定を変えられます。"
-                        : "緩める変更は 24 時間後に効くようになります。"
-                )
-                .font(.caption)
-                .foregroundStyle(safety.settings.canChangeLater ? Color.secondary : Color.orange)
+                Text(changeLaterCaption)
+                    .font(.caption)
+                    .foregroundStyle(safety.settings.canChangeLater ? Color.secondary : Color.orange)
             }
         }
         .toggleStyle(.switch)
+    }
+
+    /// 「あとで設定を変えられるようにする」の説明文。
+    ///
+    /// ON に戻す操作は予約になり、トグルは OFF のまま戻る。何も起きなかったように
+    /// 見えてしまうので、予約中はその旨と発効時刻を書く。
+    private var changeLaterCaption: String {
+        if safety.settings.canChangeLater {
+            return "いつでも設定を変えられます。"
+        }
+        if let pending = safety.settings.pendingChange, pending.restoresChangeability {
+            let time = SafetyModeViewModel.pendingTimeText(effectiveAt: pending.effectiveAt)
+            return "ON に戻す予約中(\(time))"
+        }
+        return "緩める変更は 24 時間後に効くようになります。"
     }
 
     private var changeLaterBinding: Binding<Bool> {
@@ -488,13 +499,25 @@ public struct SafetyModeView: View {
     }
 
     private func isPending(_ feature: SafetyFeature) -> Bool {
-        safety.settings.pendingChange?.disabling.contains(feature) == true
+        safety.settings.pendingChange?.enabling.contains(feature) == true
     }
 
-    /// 前提(`requires`)のトグルが OFF で選べない機能か。
+    /// 前提(`requires`)のトグルが ON でも予約中でもなく、選べない機能か。
+    ///
+    /// 前提が予約中(発効待ちの ON に載っている)なら、ポリシーは従属も同じ予約に
+    /// 積むことを認める(`SafetyPolicy.decideEnable`)ので、選べないとは扱わない。
     private func isDependencyDisabled(_ feature: SafetyFeature) -> Bool {
         guard let required = feature.requires else { return false }
-        return !safety.isEnabled(required)
+        return !safety.isEnabled(required) && !isPending(required)
+    }
+
+    /// 従属のカードに添える 1 行。前提が ON なら何も添えない。
+    private func dependencyNote(for feature: SafetyFeature) -> String? {
+        guard let required = feature.requires else { return nil }
+        return SafetyModeViewModel.dependencyNote(
+            isRequiredEnabled: safety.isEnabled(required),
+            isRequiredPending: isPending(required)
+        )
     }
 
     /// Toggle 左に錠の行を出すか。監視中は ON 方向が一切できないので、

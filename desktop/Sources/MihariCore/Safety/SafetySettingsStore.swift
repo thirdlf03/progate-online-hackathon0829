@@ -108,7 +108,7 @@ public final class SafetySettingsStore: ObservableObject {
         switch decision {
         case .apply(let newSettings, _):
             commit(newSettings)
-        case .schedule(let newSettings):
+        case .schedule(let newSettings, _):
             commit(newSettings)
         case .reject:
             break
@@ -137,8 +137,9 @@ public final class SafetySettingsStore: ObservableObject {
     /// 保存値・移行・期限が来た予約・環境変数をまとめて最初の設定を決める。副作用なし。
     ///
     /// 読み込みの順序: 保存値(無ければ `.default`) → 期限が来た予約の適用 → normalized
-    /// → 環境変数による `enabled` の上書き。環境変数は「開発者が今だけ見たい形」なので
-    /// normalized は通さず、`iphoneScreenshot` だけ渡せばそのまま立つ。
+    /// → 環境変数による `enabled` の上書き → normalized。環境変数は「開発者が今だけ見たい
+    /// 形」だが、依存を欠いた組み合わせ(`iphonePresence` OFF で `iphoneScreenshot` ON)を
+    /// そのまま bridge へ渡してしまうので、上書きのあとも整形を通す。
     static func load(
         defaults: UserDefaults,
         environment: [String: String],
@@ -163,6 +164,7 @@ public final class SafetySettingsStore: ObservableObject {
         // 開発用の上書き。保存しないので、次の起動はまた保存値に戻る。
         if let raw = environment[Self.environmentKey] {
             settings.enabled = Set(Self.parseEnvironment(raw))
+            settings = settings.normalized()
         }
         return settings
     }

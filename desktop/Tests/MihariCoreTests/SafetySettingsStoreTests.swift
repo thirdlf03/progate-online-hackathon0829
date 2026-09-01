@@ -112,6 +112,30 @@ struct SafetySettingsStoreTests {
         #expect(store.mode == .unlimited)
     }
 
+    @Test("環境変数の上書きも normalized を通す")
+    func environmentOverrideIsNormalized() {
+        // iphoneScreenshot だけ渡しても、前提の iphonePresence が無いので立たない。
+        // ここを通さないと、依存の壊れた組み合わせが bridge へ渡ってしまう。
+        let store = SafetySettingsStore(
+            defaults: makeDefaults(),
+            environment: [SafetySettingsStore.environmentKey: "iphoneScreenshot"],
+            now: { self.now }
+        )
+        defer { store.stop() }
+
+        #expect(store.settings.enabled.isEmpty)
+        #expect(store.daemonPayload.features.iphoneScreenshot == false)
+
+        // 前提と一緒に渡せば両方立つ。
+        let both = SafetySettingsStore(
+            defaults: makeDefaults(),
+            environment: [SafetySettingsStore.environmentKey: "iphonePresence,iphoneScreenshot"],
+            now: { self.now }
+        )
+        defer { both.stop() }
+        #expect(both.settings.enabled == [.iphonePresence, .iphoneScreenshot])
+    }
+
     @Test("環境変数の無効な名前は無視する")
     func environmentIgnoresUnknownNames() {
         let features = SafetySettingsStore.parseEnvironment("macCamera,bogus,iphonePresence")
@@ -168,8 +192,8 @@ struct SafetySettingsStoreTests {
         #expect(payload.features.discordExposure)
     }
 
-    @Test("canChangeLater == false の間の OFF は予約になり、期限が来たら適用されて保存される")
-    func pendingDisableAppliesAndPersistsAfterCoolingOff() {
+    @Test("canChangeLater == false の間の ON は予約になり、期限が来たら適用されて保存される")
+    func pendingEnableAppliesAndPersistsAfterCoolingOff() {
         let defaults = makeDefaults()
         let store = SafetySettingsStore(
             defaults: defaults,
@@ -177,18 +201,17 @@ struct SafetySettingsStoreTests {
             now: { self.now }
         )
         store.request(.setCanChangeLater(false), isWatching: false)
-        store.request(.enable(.macCamera), isWatching: false)
-        // ON のあとに OFF を頼むと、クーリングオフ中のため予約になる。
-        let decision = store.request(.disable(.macCamera), isWatching: false)
+        // クーリングオフ中の ON は予約になる。
+        let decision = store.request(.enable(.macCamera), isWatching: false)
 
         guard case .schedule = decision else {
-            Issue.record("OFF が schedule になっていない: \(decision)")
+            Issue.record("ON が schedule になっていない: \(decision)")
             return
         }
-        #expect(store.isEnabled(.macCamera))  // 予約中はまだ ON
+        #expect(store.isEnabled(.macCamera) == false)  // 予約中はまだ OFF
         #expect(store.settings.pendingChange?.effectiveAt == now.addingTimeInterval(SafetyPolicy.coolingOffInterval))
 
-        // 期限が来た状態で新しいストアを作ると、起動時適用で OFF になっている。
+        // 期限が来た状態で新しいストアを作ると、起動時適用で ON になっている。
         let afterDue = now.addingTimeInterval(SafetyPolicy.coolingOffInterval + 1)
         let reloaded = SafetySettingsStore(
             defaults: defaults,
@@ -196,8 +219,23 @@ struct SafetySettingsStoreTests {
             now: { afterDue }
         )
         defer { reloaded.stop() }
-        #expect(reloaded.isEnabled(.macCamera) == false)
+        #expect(reloaded.isEnabled(.macCamera))
         #expect(reloaded.settings.pendingChange == nil)
+    }
+
+    @Test("canChangeLater == false でも OFF は即時に効いて保存される")
+    func disableAppliesImmediatelyDuringCoolingOff() {
+        let defaults = makeDefaults()
+        let store = SafetySettingsStore(defaults: defaults, environment: [:], now: { self.now })
+        defer { store.stop() }
+
+        store.request(.enable(.macCamera), isWatching: false)
+        store.request(.setCanChangeLater(false), isWatching: false)
+        let decision = store.request(.disable(.macCamera), isWatching: false)
+
+        #expect(decision == .apply(store.settings, skipped: []))
+        #expect(store.isEnabled(.macCamera) == false)
+        #expect(store.settings.pendingChange == nil)
     }
 
     /// テストの途中で時刻を進められるようにするための箱。`now` クロージャ(@Sendable)が
@@ -216,23 +254,22 @@ struct SafetySettingsStoreTests {
         let store = SafetySettingsStore(defaults: defaults, environment: [:], now: { clock.value })
         store.request(.setCanChangeLater(false), isWatching: false)
         store.request(.enable(.macCamera), isWatching: false)
-        store.request(.disable(.macCamera), isWatching: false)
 
         // 期限内は何も起きない。
         store.applyDuePendingChangeIfNeeded()
-        #expect(store.isEnabled(.macCamera))
+        #expect(store.isEnabled(.macCamera) == false)
         #expect(store.settings.pendingChange != nil)
 
         // 時刻が進んで期限が来たら、適用して保存する。
         clock.value = now.addingTimeInterval(SafetyPolicy.coolingOffInterval + 1)
         store.applyDuePendingChangeIfNeeded()
-        #expect(store.isEnabled(.macCamera) == false)
+        #expect(store.isEnabled(.macCamera))
         #expect(store.settings.pendingChange == nil)
 
-        // 保存されているので、新しいストアでも OFF のまま。
+        // 保存されているので、新しいストアでも ON のまま。
         let reloaded = SafetySettingsStore(defaults: defaults, environment: [:], now: { self.now })
         defer { reloaded.stop() }
-        #expect(reloaded.isEnabled(.macCamera) == false)
+        #expect(reloaded.isEnabled(.macCamera))
         #expect(reloaded.settings.pendingChange == nil)
     }
 

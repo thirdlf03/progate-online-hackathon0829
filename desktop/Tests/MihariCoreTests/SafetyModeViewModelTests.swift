@@ -48,13 +48,110 @@ struct SafetyModeViewModelTests {
     @Test("schedule は予約帯で示すので状態行には何も出さない")
     func scheduleProducesNoStatusMessage() {
         let settings = SafetySettings()
-        #expect(SafetyModeViewModel.statusMessage(for: .schedule(settings)) == nil)
+        #expect(SafetyModeViewModel.statusMessage(for: .schedule(settings, skipped: [])) == nil)
     }
 
     @Test("予約の発効時刻は M/d HH:mm の形で表示する")
     func pendingTimeTextUsesMonthDayAnd24HourClock() throws {
-        // 実行環境のローカルタイムゾーンのグレゴリオ暦で 9/2 14:30 を作り、
-        // 表示も同じタイムゾーンで整形されることを確かめる。
+        // 9/2 14:30 が、作ったときと同じタイムゾーンで整形されることを確かめる。
+        let date = try makeDate()
+
+        #expect(SafetyModeViewModel.pendingTimeText(effectiveAt: date) == "9/2 14:30")
+        #expect(SafetyModeViewModel.pendingFeatureText(effectiveAt: date) == "9/2 14:30 に ON")
+    }
+
+    @Test("予約帯は中身に応じて ON になる機能 / 変更可否の復帰を出し分ける")
+    func pendingStatusTextDependsOnTheReservationContents() throws {
+        let date = try makeDate()
+
+        // 機能だけの予約。名前はトグルの並び順で並べる。
+        let features = SafetyPendingChange(
+            enabling: [.discordExposure, .macCamera],
+            restoresChangeability: false,
+            effectiveAt: date
+        )
+        #expect(
+            SafetyModeViewModel.pendingStatusText(for: features)
+                == "9/2 14:30 に ON になります(Mac のカメラで撮る, Discord に晒す)"
+        )
+
+        // 変更可否を戻すだけの予約。
+        let changeability = SafetyPendingChange(
+            enabling: [],
+            restoresChangeability: true,
+            effectiveAt: date
+        )
+        #expect(
+            SafetyModeViewModel.pendingStatusText(for: changeability)
+                == "9/2 14:30 に「あとで設定を変えられるようにする」が ON に戻ります"
+        )
+
+        // 両方が同じ予約に乗ったときは 1 文にまとめる。
+        let both = SafetyPendingChange(
+            enabling: [.macCamera],
+            restoresChangeability: true,
+            effectiveAt: date
+        )
+        #expect(
+            SafetyModeViewModel.pendingStatusText(for: both)
+                == "9/2 14:30 に ON になります(Mac のカメラで撮る、「あとで設定を変えられるようにする」)"
+        )
+    }
+
+    @Test("オンボーディングのステップ 2 は全 OFF なら飛ばす")
+    func permissionsStepIsSkippedWhenNothingToShow() {
+        // 全 OFF でもモーション(トグルと紐づかない任意の権限)は一覧に残る。実際に
+        // 渡ってくるのはこの配列なので、手で空配列を作らずここから取る。
+        let allOff = PermissionKind.relevant(for: .default)
+        #expect(allOff == [.motion])
+        #expect(
+            SafetyModeViewModel.shouldSkipPermissionsStep(
+                relevantKinds: allOff,
+                isIPhoneScreenshotEnabled: false
+            )
+        )
+
+        // トグルが要求する権限が 1 本でもあれば、飛ばさず権限画面を見せる。
+        var camera = SafetySettings.default
+        camera.enabled = [.macCamera]
+        #expect(
+            !SafetyModeViewModel.shouldSkipPermissionsStep(
+                relevantKinds: PermissionKind.relevant(for: camera),
+                isIPhoneScreenshotEnabled: false
+            )
+        )
+        // tunneld が要る(iphoneScreenshot が ON の)ときも、登録画面を見せる。
+        #expect(
+            !SafetyModeViewModel.shouldSkipPermissionsStep(
+                relevantKinds: allOff,
+                isIPhoneScreenshotEnabled: true
+            )
+        )
+    }
+
+    @Test("従属のカードの 1 行は、前提が ON / 予約中 / OFF で変わる")
+    func dependencyNoteFollowsTheRequiredToggle() {
+        // 前提が ON なら、従属は普通のカードなので何も添えない。
+        #expect(
+            SafetyModeViewModel.dependencyNote(isRequiredEnabled: true, isRequiredPending: false) == nil
+        )
+
+        // 前提が予約中なら、従属も同じ予約に積める。選べない理由ではなく、一緒に ON に
+        // なることを伝える。
+        #expect(
+            SafetyModeViewModel.dependencyNote(isRequiredEnabled: false, isRequiredPending: true)
+                == "「iPhone を見張る」の予約と一緒に ON になります"
+        )
+
+        // どちらでもなければ選べない。
+        #expect(
+            SafetyModeViewModel.dependencyNote(isRequiredEnabled: false, isRequiredPending: false)
+                == "「iPhone を見張る」を ON にすると選べます"
+        )
+    }
+
+    /// 実行環境のローカルタイムゾーンのグレゴリオ暦で 2025/9/2 14:30 を作る。
+    private func makeDate() throws -> Date {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
         var components = DateComponents()
@@ -63,21 +160,6 @@ struct SafetyModeViewModelTests {
         components.day = 2
         components.hour = 14
         components.minute = 30
-        let date = try #require(calendar.date(from: components))
-
-        #expect(SafetyModeViewModel.pendingTimeText(effectiveAt: date) == "9/2 14:30")
-        #expect(SafetyModeViewModel.pendingStatusText(effectiveAt: date) == "9/2 14:30 に OFF になります")
-    }
-
-    @Test("オンボーディングのステップ 2 は要求権限が空かつスクショ OFF なら飛ばす")
-    func permissionsStepIsSkippedWhenNothingToShow() {
-        #expect(SafetyModeViewModel.shouldSkipPermissionsStep(relevantKinds: [], isIPhoneScreenshotEnabled: false))
-
-        // 要求すべき権限が 1 本でもあれば、飛ばさず権限画面を見せる。
-        #expect(
-            !SafetyModeViewModel.shouldSkipPermissionsStep(relevantKinds: [.camera], isIPhoneScreenshotEnabled: false)
-        )
-        // tunneld が要る(iphoneScreenshot が ON の)ときも、登録画面を見せる。
-        #expect(!SafetyModeViewModel.shouldSkipPermissionsStep(relevantKinds: [], isIPhoneScreenshotEnabled: true))
+        return try #require(calendar.date(from: components))
     }
 }

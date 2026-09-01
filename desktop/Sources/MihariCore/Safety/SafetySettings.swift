@@ -2,24 +2,35 @@ import Foundation
 
 /// 予約(runtime に発効する変更)の 1 本分。
 ///
-/// `canChangeLater == false` のクーリングオフ中に「OFF にする」や「設定変更を
+/// `canChangeLater == false` のクーリングオフ中に「ON にする」や「設定変更を
 /// 許可し直す」を頼まれたとき、24 時間後にこの 1 本にまとめて発効する。
+/// OFF 方向(安全側)は予約に入らない——常に即時なので。
 public struct SafetyPendingChange: Codable, Equatable, Sendable {
-    /// 発効時に OFF にする機能。
-    public var disabling: Set<SafetyFeature>
+    /// 発効時に ON にする機能。
+    public var enabling: Set<SafetyFeature>
     /// 発効時に `canChangeLater` を true に戻すか。
     public var restoresChangeability: Bool
     /// 発効時刻。この時刻以前になったら適用する。
     public var effectiveAt: Date
 
     public init(
-        disabling: Set<SafetyFeature>,
+        enabling: Set<SafetyFeature>,
         restoresChangeability: Bool,
         effectiveAt: Date
     ) {
-        self.disabling = disabling
+        self.enabling = enabling
         self.restoresChangeability = restoresChangeability
         self.effectiveAt = effectiveAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // 旧形式は OFF 方向を積む `disabling` キーだった。OFF は今や常に即時なので、
+        // 旧キーは読まずに捨てる。`enabling` が無い保存値は空集合として読む
+        // (= 変更可否を戻すだけの予約になる)。
+        enabling = try container.decodeIfPresent(Set<SafetyFeature>.self, forKey: .enabling) ?? []
+        restoresChangeability = try container.decode(Bool.self, forKey: .restoresChangeability)
+        effectiveAt = try container.decode(Date.self, forKey: .effectiveAt)
     }
 }
 
@@ -32,7 +43,7 @@ public struct SafetySettings: Codable, Equatable, Sendable {
 
     /// いま ON の機能。既定は全 OFF(= セーフティーモード)。
     public var enabled: Set<SafetyFeature> = []
-    /// 「あとで設定を変えられるようにする」。false の間は OFF 方向も予約(クーリングオフ)になる。
+    /// 「あとで設定を変えられるようにする」。false の間は ON 方向が予約(クーリングオフ)になる。
     public var canChangeLater: Bool = true
     /// 発効待ちの予約。無ければ nil。
     public var pendingChange: SafetyPendingChange? = nil
