@@ -84,7 +84,8 @@ struct OverlayModelTests {
         musicController: MusicControlling = StubMusicController(),
         maxDurationSeconds: Int = 100,
         resumeMusicAfterDismiss: Bool = false,
-        speak: @escaping OverlayModel.SermonSpeaking = { _ in "テストのセリフ" }
+        speak: @escaping OverlayModel.SermonSpeaking = { _ in "テストのセリフ" },
+        gate: SafetyGate = .allowAll
     ) -> OverlayModel {
         OverlayModel(
             presenter: presenter,
@@ -92,8 +93,35 @@ struct OverlayModelTests {
             maxDurationSeconds: maxDurationSeconds,
             resumeMusicAfterDismiss: resumeMusicAfterDismiss,
             speak: speak,
-            sleep: fastSleep
+            sleep: fastSleep,
+            gate: gate
         )
+    }
+
+    @Test("sermonTakeover が OFF なら show しても表示せず音楽も止めない")
+    func disabledSermonTakeoverDoesNothing() async {
+        let presenter = StubPresenter()
+        let model = makeModel(presenter: presenter, gate: .denyAll)
+
+        model.show()
+
+        // 表示状態にならず、音楽停止(とその後続)の副作用も一切起きない。
+        #expect(model.isPresented == false)
+        #expect(presenter.presentCount == 0)
+        #expect(model.lastMusicOutcome == nil)
+        #expect(model.lastDismissReason == nil)
+    }
+
+    @Test("sermonTakeover が ON なら従来どおり表示される")
+    func allowedSermonTakeoverPresents() async {
+        let presenter = StubPresenter()
+        let model = makeModel(presenter: presenter, gate: .allowAll)
+
+        model.show()
+        await model.waitForSermonSetupForTesting()
+
+        #expect(presenter.presentCount == 1)
+        model.dismissManually()
     }
 
     @Test("上限秒数が経過すると、セリフ取得が終わらなくても必ず解除される")

@@ -14,6 +14,8 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     var isStatusPanelVisible: Bool { get }
     /// スクショに写り込むか。メニューのチェックに使う。
     var isPhotobombEnabled: Bool { get }
+    /// デバッグメニューを出すか。開発中だけ表示するデバッグ用途の項目を隠すのに使う。
+    var isDebugMenuVisible: Bool { get }
     /// いまの音声モード。デバッグメニューのチェックに使う。
     var voiceMode: VoiceMode { get }
     /// 集中継続を褒める間隔(秒)。デバッグメニューのチェックに使う。

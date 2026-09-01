@@ -9,6 +9,7 @@ final class StubPetMenuActions: ObservableObject, PetMenuActions {
     var isOnBreak = false
     var isStatusPanelVisible = false
     var isPhotobombEnabled = true
+    var isDebugMenuVisible = true
     var voiceMode: VoiceMode = .bundled
     var focusStreakIntervalSeconds: TimeInterval = 900
     var isFastThresholds = false
