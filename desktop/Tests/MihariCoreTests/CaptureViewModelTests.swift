@@ -74,3 +74,33 @@ struct CaptureViewModelIPhoneTests {
         #expect(model.errorMessage?.contains("tunneld") == true)
     }
 }
+
+@Suite("Mac スクショの画面収録権限")
+@MainActor
+struct CaptureViewModelScreenRecordingPermissionTests {
+
+    /// 要求スタブが呼ばれた権限を記録する。クロージャは @Sendable なのでアクターで守る。
+    private actor RequestedBox {
+        private(set) var kinds: [PermissionKind] = []
+        func record(_ kind: PermissionKind) { kinds.append(kind) }
+    }
+
+    @Test("画面収録が未許可なら要求を出して、撮影はしない")
+    func requestsPermissionBeforeCapturing() async {
+        let box = RequestedBox()
+        let model = CaptureViewModel(
+            checkPermission: { _ in PermissionState(grant: .denied, detail: "stub: denied") },
+            requestPermission: { kind in
+                await box.record(kind)
+                return "画面収録: 許可が必要"
+            }
+        )
+
+        await model.captureScreenshot()
+
+        let requested = await box.kinds
+        #expect(requested == [.screenRecording])
+        #expect(model.lastArtifact == nil)
+        #expect(model.errorMessage == "画面収録: 許可が必要")
+    }
+}

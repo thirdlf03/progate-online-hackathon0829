@@ -30,15 +30,25 @@ public final class CaptureViewModel: ObservableObject {
     private let iphoneScreenshot: (@Sendable () async throws -> Data)?
     /// 状況を渡して喋らせる経路。こちらもデーモン経由なので外から差し込む。
     private let speak: (@MainActor @Sendable (SpeechRequest) async -> VoiceController.Utterance?)?
+    /// 権限の現在の状態の照会口。テストでは実機の TCC を見に行かないよう差し替える。
+    private let checkPermission: @Sendable (PermissionKind) -> PermissionState
+    /// 権限の要求口。テストではプロンプトを出さないよう差し替える。
+    private let requestPermission: @Sendable (PermissionKind) async -> String
 
     public init(
         service: CaptureService = CaptureService(),
         iphoneScreenshot: (@Sendable () async throws -> Data)? = nil,
-        speak: (@MainActor @Sendable (SpeechRequest) async -> VoiceController.Utterance?)? = nil
+        speak: (@MainActor @Sendable (SpeechRequest) async -> VoiceController.Utterance?)? = nil,
+        checkPermission: @escaping @Sendable (PermissionKind) -> PermissionState = { PermissionChecker.check($0) },
+        requestPermission: @escaping @Sendable (PermissionKind) async -> String = {
+            await PermissionRequester.request($0)
+        }
     ) {
         self.service = service
         self.iphoneScreenshot = iphoneScreenshot
         self.speak = speak
+        self.checkPermission = checkPermission
+        self.requestPermission = requestPermission
     }
 
     /// iPhone スクショの経路が配線されているか。ボタンの表示条件に使う。
@@ -57,10 +67,18 @@ public final class CaptureViewModel: ObservableObject {
     }
 
     /// メインディスプレイのスクリーンショットを 1 枚撮る。
+    ///
+    /// 画面収録はセーフティートグルと無関係(デバッグの Mac スクショ専用)なので、
+    /// 撮る直前に許可を確認し、未許可ならその場で要求する。許可されていなければ撮らない。
     public func captureScreenshot() async {
         guard !isCapturingScreenshot else { return }
         isCapturingScreenshot = true
         defer { isCapturingScreenshot = false }
+
+        guard checkPermission(.screenRecording).grant == .granted else {
+            errorMessage = await requestPermission(.screenRecording)
+            return
+        }
         await runCapture(label: "スクリーンショット") { [service] in try await service.captureScreenshot() }
     }
 

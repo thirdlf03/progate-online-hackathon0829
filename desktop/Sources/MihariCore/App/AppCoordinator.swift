@@ -19,6 +19,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     public let permissions: PermissionsModel
     public let daemon = DaemonController()
+    /// iPhone スクショ(iOS 17+)に必要な tunneld の常駐。`OnboardingView` に渡して登録させ、
+    /// セーフティートグル `iphoneScreenshot` を OFF にしたらこちらから解除する。
+    public let tunneld = TunneldModel()
     public let voice: VoiceController
     /// 同封音声か live か。ペット・検知・説教のすべてがここを見る。
     public let voiceModeStore: VoiceModeStore
@@ -167,6 +170,8 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     /// 起動直後に一度だけ呼ぶ。権限が揃っているかで、権限画面を出すか見張り始めるかを決める。
     public func launch() {
+        // 必須権限はセーフティートグルから導出する。トグルを変えたあとの起動にも正しく反映させる。
+        permissions.apply(settings: safety.settings)
         permissions.refresh()
 
         if Self.isDebugUIRequested {
@@ -318,6 +323,7 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
             if canStart {
                 OnboardingView(
                     model: permissions,
+                    tunneld: tunneld,
                     onStart: { [weak self] in
                         guard let self else { return }
                         windows.closePermissions()
@@ -327,6 +333,7 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
             } else {
                 OnboardingView(
                     model: permissions,
+                    tunneld: tunneld,
                     onClose: { [weak self] in self?.windows.closePermissions() }
                 )
             }
@@ -669,6 +676,31 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.pushSafetyToDaemon()
+                }
+            }
+            .store(in: &cancellables)
+
+        // トグルの変化を権限モデルへ流し込む。必須権限はトグルから導出するので、
+        // 設定が変わったら必ず追従させる(#51)。初回配信は `launch()` が apply 済み。
+        safety.$settings
+            .sink { [weak self] settings in
+                MainActor.assumeIsolated {
+                    self?.permissions.apply(settings: settings)
+                }
+            }
+            .store(in: &cancellables)
+
+        // iPhone スクショのトグルを OFF にしたら tunneld の LaunchDaemon を解除する。
+        // 登録は管理者パスワードで行う以上、OFF にした機能の常駐をこっそり残さない。
+        // ON に戻したときはオンボーディング画面から登録し直す。#51。
+        safety.$settings
+            .map { $0.isEnabled(.iphoneScreenshot) }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] enabled in
+                MainActor.assumeIsolated {
+                    guard let self, !enabled else { return }
+                    Task { await self.tunneld.uninstall() }
                 }
             }
             .store(in: &cancellables)

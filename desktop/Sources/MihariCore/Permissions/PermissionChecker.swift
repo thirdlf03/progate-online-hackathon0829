@@ -2,7 +2,6 @@ import AVFoundation
 import CoreGraphics
 import CoreMotion
 import Foundation
-import IOKit.hidsystem
 
 /// 各権限の現在の状態を OS に問い合わせる。
 ///
@@ -13,12 +12,8 @@ public enum PermissionChecker {
         switch kind {
         case .camera:
             return PermissionStateMapper.from(authorization: AVCaptureDevice.authorizationStatus(for: .video))
-        case .microphone:
-            return PermissionStateMapper.from(authorization: AVCaptureDevice.authorizationStatus(for: .audio))
         case .screenRecording:
             return PermissionStateMapper.fromScreenRecording(preflight: CGPreflightScreenCaptureAccess())
-        case .inputMonitoring:
-            return PermissionStateMapper.from(hidAccess: IOHIDCheckAccess(kIOHIDRequestTypeListenEvent))
         case .automation:
             return AutomationProbe.status()
         case .motion:
