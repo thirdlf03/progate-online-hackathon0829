@@ -95,7 +95,8 @@ public final class SafetySettingsStore: ObservableObject {
 
     /// 変更を依頼する。apply / schedule なら保存し、reject なら何もしない。
     ///
-    /// - Parameter isWatching: いま監視中か。ポリシーの ON 方向の制限に使う。
+    /// - Parameter isWatching: いま監視中か(ロック中も監視中として渡す)。ポリシーは
+    ///   `quitLock` を OFF にできるかの判定にだけ使う。
     /// - Returns: ポリシーが下した決定。
     @discardableResult
     public func request(_ change: SafetyChange, isWatching: Bool) -> SafetyDecision {

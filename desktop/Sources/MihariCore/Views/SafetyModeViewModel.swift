@@ -39,8 +39,6 @@ public enum SafetyModeViewModel {
             return nil
         case .reject(let reason):
             switch reason {
-            case .enablingWhileWatching:
-                return "監視中は ON にできません。監視を止めると ON にできます(右クリック →「監視を止める」)"
             case .quitLockWhileWatching:
                 let unlock = lockedUntil.map { "ロック解除(\(clockText($0)))" } ?? "ロック解除"
                 return "\(unlock)まで OFF にできません。どうしても終了したい場合は右クリック →「どうしても終了する」"
@@ -59,35 +57,21 @@ public enum SafetyModeViewModel {
         )
     }
 
-    /// カードの Toggle の左に出す「変更できない理由」。
+    /// #5(終了ブロック)の Toggle の左に出す「OFF にできない理由」。
     ///
-    /// 監視中なら止めれば変えられることを、監視は止まっていてロックだけが残っているなら
-    /// いつまで待てばよいかを書く。どちらでもなければ何も出さない。
-    public static func cardRestrictionNote(isWatching: Bool, lockedUntil: Date?) -> String? {
-        if isWatching {
-            return "監視を止めると変更できます"
+    /// 変更できない旨を出すのはこの 1 本だけ。ほかのトグルは監視中でも ON も OFF も
+    /// できるので、何も添えない。
+    ///
+    /// 解除時刻が分かるならそれを出す。監視を止めてもロックが残っている間は OFF に
+    /// できないので、「監視中」ではなくロックが理由であることを書く(#52)。時刻が
+    /// 取れないとき(ロックは切れたが監視は続いている)だけ「監視中」と書く。
+    ///
+    /// - Returns: 出す文言。制限がかかっていなければ nil。
+    public static func quitLockRestrictionNote(isWatching: Bool, lockedUntil: Date?) -> String? {
+        if let lockedUntil {
+            return "ロック中(\(clockText(lockedUntil)) まで): OFF にできません"
         }
-        guard let lockedUntil else { return nil }
-        return lockOnlyNote(lockedUntil: lockedUntil)
-    }
-
-    /// 設定画面のフッターに出す「変更できない理由」。
-    ///
-    /// カード側と違い、画面全体に効く制限として書く。
-    public static func footerRestrictionNote(isWatching: Bool, lockedUntil: Date?) -> String? {
-        if isWatching {
-            return "監視中: ON にする変更はできません"
-        }
-        guard let lockedUntil else { return nil }
-        return lockOnlyNote(lockedUntil: lockedUntil)
-    }
-
-    /// 監視は止まっているのにロックだけが残っている状態の 1 行。
-    ///
-    /// この状態を「監視中」と書くと、監視を止めたのに監視中と言われて混乱するため、
-    /// ロックが理由であることと解除時刻をそのまま出す(#52)。
-    private static func lockOnlyNote(lockedUntil: Date) -> String {
-        "ロック中(\(clockText(lockedUntil)) まで): 設定を緩められません"
+        return isWatching ? "監視中: OFF にできません" : nil
     }
 
     /// 予約の発効時刻の表示文字列。`Date.FormatStyle` で `M/d HH:mm` の形にする。

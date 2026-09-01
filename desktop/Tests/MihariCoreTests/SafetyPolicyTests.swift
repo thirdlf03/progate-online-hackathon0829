@@ -6,7 +6,7 @@ import Testing
 /// セーフティートグルの変更可否ルール(Epic #58「トグルの変更ルール」)を検証する。
 ///
 /// - OFF 方向(安全側)は常に即時。例外は quitLock の監視中 OFF だけ。
-/// - ON 方向は監視していないときだけ。requires が OFF なら拒否。
+/// - ON 方向もいつでも即時(監視中・ロック中でも通る)。requires が OFF なら拒否。
 /// - canChangeLater == false の間は、ON 方向が 24 時間後の予約(クーリングオフ)になる。
 @Suite("セーフティーポリシー")
 struct SafetyPolicyTests {
@@ -181,8 +181,8 @@ struct SafetyPolicyTests {
 
     // MARK: - ON 方向
 
-    @Test("ON は監視中は拒否される")
-    func enablingWhileWatchingIsRejected() {
+    @Test("ON は監視中でも即時に効く")
+    func enablingAppliesImmediatelyWhileWatching() {
         let current = makeSettings()
 
         let decision = SafetyPolicy.decide(
@@ -192,11 +192,12 @@ struct SafetyPolicyTests {
             now: now
         )
 
-        #expect(decision == .reject(.enablingWhileWatching))
+        let expected = makeSettings(enabled: [.macCamera])
+        #expect(decision == .apply(expected, skipped: []))
     }
 
-    @Test("監視中の ON は canChangeLater が false でも拒否(予約にもならない)")
-    func enablingWhileWatchingIsRejectedDuringCoolingOffToo() {
+    @Test("監視中の ON も canChangeLater が false なら予約になる")
+    func enablingWhileWatchingIsScheduledDuringCoolingOff() {
         let current = makeSettings(canChangeLater: false)
 
         let decision = SafetyPolicy.decide(
@@ -206,7 +207,13 @@ struct SafetyPolicyTests {
             now: now
         )
 
-        #expect(decision == .reject(.enablingWhileWatching))
+        var expected = makeSettings(canChangeLater: false)
+        expected.pendingChange = SafetyPendingChange(
+            enabling: [.macCamera],
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        #expect(decision == .schedule(expected, skipped: []))
 
         let all = SafetyPolicy.decide(
             .enableAll,
@@ -214,7 +221,13 @@ struct SafetyPolicyTests {
             isWatching: true,
             now: now
         )
-        #expect(all == .reject(.enablingWhileWatching))
+        var expectedAll = makeSettings(canChangeLater: false)
+        expectedAll.pendingChange = SafetyPendingChange(
+            enabling: Set(SafetyFeature.allCases),
+            restoresChangeability: false,
+            effectiveAt: due
+        )
+        #expect(all == .schedule(expectedAll, skipped: []))
     }
 
     @Test("ON は監視していなければ即時に効く")
@@ -357,9 +370,10 @@ struct SafetyPolicyTests {
 
     // MARK: - 全部切り替え
 
-    @Test("enableAll は監視中でなければ全 ON、監視中は拒否")
+    @Test("enableAll は監視中でも監視中でなくても全 ON")
     func enableAll() {
         let current = makeSettings(enabled: [.macCamera])
+        let expected = makeSettings(enabled: Set(SafetyFeature.allCases))
 
         let whileWatching = SafetyPolicy.decide(
             .enableAll,
@@ -367,7 +381,7 @@ struct SafetyPolicyTests {
             isWatching: true,
             now: now
         )
-        #expect(whileWatching == .reject(.enablingWhileWatching))
+        #expect(whileWatching == .apply(expected, skipped: []))
 
         let notWatching = SafetyPolicy.decide(
             .enableAll,
@@ -375,7 +389,6 @@ struct SafetyPolicyTests {
             isWatching: false,
             now: now
         )
-        let expected = makeSettings(enabled: Set(SafetyFeature.allCases))
         #expect(notWatching == .apply(expected, skipped: []))
     }
 

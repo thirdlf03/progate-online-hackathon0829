@@ -909,8 +909,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     /// スクショへの写り込みを入れる / 切る。
     ///
-    /// フラグはセーフティートグル(.photobomb)として扱う。ON の監視中はポリシーが
-    /// 拒否するので、切り替え結果はメニューのチェックが次に組み立てられるときに映る。
+    /// フラグはセーフティートグル(.photobomb)として扱う。ON も OFF も監視中に通るが、
+    /// 「あとで設定を変えられるようにする」が OFF なら ON は 24 時間後の予約になるので、
+    /// 切り替え結果はメニューのチェックが次に組み立てられるときに映る。
     public func setPhotobombEnabled(_ enabled: Bool) {
         safety.request(
             enabled ? .enable(.photobomb) : .disable(.photobomb),

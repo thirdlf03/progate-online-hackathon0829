@@ -32,7 +32,7 @@ public struct SafetyModeView: View {
     private let isWatching: Bool
     /// 終了ロックの解除時刻。ロック中でなければ nil(オンボーディングでは常に nil)。
     ///
-    /// ロック中は監視を止めていても設定を緩められないが、それを「監視中」と書くと
+    /// ロック中は監視を止めていても #5 を OFF にできないが、それを「監視中」と書くと
     /// 監視を止めた人を混乱させるので、監視とロックは分けて受け取る(#52)。
     private let lockedUntil: Date?
     private let context: Context
@@ -129,9 +129,7 @@ public struct SafetyModeView: View {
                 Button("全部 ON") { applyAllOn() }
                     .controlSize(.small)
                     .buttonStyle(.bordered)
-                    .disabled(
-                        safety.settings.enabled.count == SafetyFeature.total || isRestricted
-                    )
+                    .disabled(safety.settings.enabled.count == SafetyFeature.total)
                 Button("全部 OFF") { applyAllOff() }
                     .controlSize(.small)
                     .buttonStyle(.bordered)
@@ -230,14 +228,12 @@ public struct SafetyModeView: View {
                 }
                 .offset(y: -12)
 
-                if !isRestricted {
-                    // この行だけ opacity 1(選べないときのカード本体は 0.5 で沈める)。
-                    Label(note, systemImage: "arrow.turn.down.right")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 30)
-                        .padding(.bottom, 4)
-                }
+                // この行だけ opacity 1(選べないときのカード本体は 0.5 で沈める)。
+                Label(note, systemImage: "arrow.turn.down.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 30)
+                    .padding(.bottom, 4)
 
                 cardBody(for: feature)
                     .padding(.leading, 24)
@@ -481,14 +477,6 @@ public struct SafetyModeView: View {
             }
         case .settings(let onClose):
             HStack {
-                if let note = SafetyModeViewModel.footerRestrictionNote(
-                    isWatching: isWatching,
-                    lockedUntil: lockedUntil
-                ) {
-                    Label(note, systemImage: "lock.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
                 Spacer()
                 uninstallSection
                 Button("閉じる", action: onClose)
@@ -533,7 +521,7 @@ public struct SafetyModeView: View {
         clearMessages()
         let previous = safety.settings
         let decision = safety.request(.enableAll, isWatching: isRestricted)
-        // 拒否は起こり得ない(監視中はボタンが押せない)が、来たときの出し先が要るだけ。
+        // 拒否は起こり得ない(ON はいつでも通る)が、来たときの出し先が要るだけ。
         handleDecision(decision, from: previous, affectedFeature: .macCamera)
     }
 
@@ -613,7 +601,7 @@ public struct SafetyModeView: View {
 
     // MARK: - 状態
 
-    /// 設定を緩められない状態か。監視中か、監視を止めていても終了ロックが残っているとき。
+    /// #5 を OFF にできない状態か。監視中か、監視を止めていても終了ロックが残っているとき。
     ///
     /// `SafetyPolicy` に渡す「監視中」はこの値。ロック中に監視だけ止めて縛りごと
     /// 外す抜け道を作らないため、ロック中も監視中として扱う(#52)。
@@ -648,13 +636,14 @@ public struct SafetyModeView: View {
         )
     }
 
-    /// Toggle 左に出す錠の行の文言。監視中は ON 方向が一切できないので、
-    /// OFF のままの機能すべてに出す(ON 中の機能は OFF はできる。quitLock だけ例外)。
+    /// Toggle 左に出す錠の行の文言。出るのは #5(quitLock)が ON の監視中だけ。
     ///
-    /// - Returns: 出す文言。制限がかかっていないか、その機能が ON なら nil。
+    /// ほかのトグルは監視中でも ON も OFF もできるので、錠は出さない。
+    ///
+    /// - Returns: 出す文言。#5 以外か、OFF にできる状態なら nil。
     private func lockedRowNote(for feature: SafetyFeature) -> String? {
-        guard isRestricted, !safety.isEnabled(feature) else { return nil }
-        return SafetyModeViewModel.cardRestrictionNote(
+        guard feature == .quitLock, isRestricted, safety.isEnabled(.quitLock) else { return nil }
+        return SafetyModeViewModel.quitLockRestrictionNote(
             isWatching: isWatching,
             lockedUntil: lockedUntil
         )
@@ -662,21 +651,11 @@ public struct SafetyModeView: View {
 
     /// Toggle を押せなくするか。
     ///
-    /// - 依存で無効: 常に押せない。
-    /// - 監視中で OFF の機能: ON 方向がポリシーに拒否されるので押せない。
-    /// - quitLock が ON の監視中: OFF も拒否されるが、その理由を状態行で見せるため
-    ///   あえて押せるままにする。
+    /// 押せないのは前提(`requires`)が OFF の従属だけ。ON はいつでも即時に通り、OFF も
+    /// 常に即時なので、監視中・ロック中を理由に押せなくはしない。quitLock が ON の
+    /// 監視中は OFF が拒否されるが、その理由を状態行で見せるためあえて押せるままにする。
     private func isToggleDisabled(for feature: SafetyFeature) -> Bool {
-        if isDependencyDisabled(feature) {
-            return true
-        }
-        if isRestricted {
-            if feature == .quitLock, safety.isEnabled(.quitLock) {
-                return false
-            }
-            return !safety.isEnabled(feature)
-        }
-        return false
+        isDependencyDisabled(feature)
     }
 
     private func leftBarColor(for feature: SafetyFeature) -> Color {
