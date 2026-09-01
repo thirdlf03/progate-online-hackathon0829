@@ -7,8 +7,21 @@ API キーが無い・失敗した・遅すぎたときでもペットが黙ら�
 from __future__ import annotations
 
 import random
+from dataclasses import dataclass
 
 from device_bridge.voice.context import Escalation, IPhoneState, SpeechContext, VisionLabel
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedLine:
+    """生成したセリフと、その出どころ。"""
+
+    text: str
+    #: LLM が生成したなら ``True``、固定文言に落ちたなら ``False``。
+    from_llm: bool
+    #: 固定文言に落ちた理由。LLM 成功時は ``None``。
+    fallback_reason: str | None = None
+
 
 #: 「iPhone を触っている」ときの言い回し。ここだけは状況が特徴的なので専用に持つ。
 _PHONE_LINES: list[str] = [

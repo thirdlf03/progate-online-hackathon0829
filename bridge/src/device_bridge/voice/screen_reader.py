@@ -1,7 +1,6 @@
 """iPhone のスクショを Gemini に見せて、何をしているかとセリフを同時に作る。
 
-Claude 側と違って固定文言には落とさない。ここで失敗したら ``ScreenReadError`` を投げ、
-呼び出し側が従来の ``LineGenerator``(Claude → 固定文言)に落とす。
+ここで失敗したら ``ScreenReadError`` を投げ、呼び出し側が固定文言に落とす。
 つまり「画面を読む」だけを担い、ペットが黙らない保証は呼び出し側が持つ。
 """
 
@@ -28,7 +27,7 @@ logger = logging.getLogger(__name__)
 #: `MIHARI_SCREEN_MODEL` で上書きできる。
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
-#: 読み取りを待つ上限。画像を送るぶん Claude より少し長く取る。
+#: 読み取りを待つ上限。画像を送るぶん長めに取る。
 DEFAULT_TIMEOUT_SECONDS = 6.0
 
 #: SDK に渡せるタイムアウトの下限。
@@ -130,7 +129,7 @@ class ScreenReader:
 
     キーが無い / 失敗した / 遅すぎた / 応答が壊れていた、のどれでも
     ``ScreenReadError`` に変換して返す。例外を素通しにすると呼び出し側が
-    Claude に落とせず、ペットが黙ってしまう。
+    固定文言に落とせず、ペットが黙ってしまう。
     """
 
     def __init__(

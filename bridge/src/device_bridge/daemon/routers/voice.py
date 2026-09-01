@@ -11,9 +11,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from device_bridge.daemon.auth import verify_token
-from device_bridge.voice.context import Escalation, IPhoneState, SpeechContext, VisionLabel
-from device_bridge.voice.fallback import fallback_line
-from device_bridge.voice.generator import GeneratedLine
+from device_bridge.voice.context import (
+    Escalation,
+    IPhoneState,
+    SpeechContext,
+    VisionLabel,
+)
+from device_bridge.voice.fallback import GeneratedLine, fallback_line
 from device_bridge.voice.screen_reader import ScreenReadError, ScreenReading
 from device_bridge.voice.voicevox import VoicevoxUnavailableError
 
@@ -49,12 +53,13 @@ async def voice_status(request: Request) -> dict[str, Any]:
 
     どちらも落ちていて構わない。落ちている場合に「何をすれば喋るか」を出すために使う。
     """
-    generator = request.app.state.line_generator
     screen_reader = request.app.state.screen_reader
     voicevox = request.app.state.voicevox
     return {
-        "llm_configured": generator.is_configured,
-        "llm_model": generator.model,
+        # Claude 経路は削除したので、セリフ生成の LLM は常に無い扱いにする。
+        # キーは macOS アプリが必須としてデコードするため、形だけ残す。
+        "llm_configured": False,
+        "llm_model": "",
         "screen_llm_configured": screen_reader.is_configured,
         "screen_llm_model": screen_reader.model,
         "voicevox_url": voicevox.base_url,
@@ -182,22 +187,33 @@ async def _generate(
 ) -> tuple[GeneratedLine, ScreenReading | None, str | None]:
     """セリフを 1 本作る。スクショがあれば Gemini を先に試す。
 
-    Gemini が使えない・失敗したときは従来の Claude 経路(さらに固定文言)に落とし、
-    理由だけを ``screen_error`` として返す。画面が読めないことは喋らない理由にならない。
+    スクショが無い(カメラ経路を含む)・Gemini が使えない・失敗したときは固定文言に落とし、
+    理由を ``fallback_reason`` に載せる。画面が読めないことは喋らない理由にならない。
+    落ちた理由は ``screen_error`` にも載せ、読めなかったことを呼び出し元に伝える。
     """
     if screenshot is None:
-        return await state.line_generator.generate(context), None, None
+        # カメラ経路などスクショが無いときも、黙らないために固定文言で返す。
+        return _fallback(context, "固定文言(スクショ無し)"), None, None
 
     reader = state.screen_reader
     if not reader.is_configured:
-        return await state.line_generator.generate(context), None, "GEMINI_API_KEY が未設定"
+        return _fallback(context, "GEMINI_API_KEY が未設定"), None, "GEMINI_API_KEY が未設定"
 
     try:
         reading = await reader.read(screenshot, context)
     except ScreenReadError as error:
-        return await state.line_generator.generate(context), None, str(error)
+        return _fallback(context, str(error)), None, str(error)
 
     return GeneratedLine(text=reading.line, from_llm=True), reading, None
+
+
+def _fallback(context: SpeechContext, reason: str) -> GeneratedLine:
+    """LLM を呼ばず固定文言で返す。失敗しても黙らないために使う。"""
+    return GeneratedLine(
+        text=fallback_line(context),
+        from_llm=False,
+        fallback_reason=reason,
+    )
 
 
 def _screen_only_payload(reading: ScreenReading | None, error: str | None) -> dict[str, Any]:

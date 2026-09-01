@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from device_bridge.daemon.routers import voice as voice_router
 from device_bridge.voice.context import Escalation, IPhoneState, SpeechContext, VisionLabel
-from device_bridge.voice.generator import GeneratedLine
 from device_bridge.voice.screen_reader import ScreenCategory, ScreenReadError, ScreenReading
 from device_bridge.voice.voicevox import VoiceTuning, VoicevoxUnavailableError
 
@@ -26,17 +25,13 @@ READING = ScreenReading(
     line="その料理動画、そんなに楽しい?",
 )
 
+#: 固定文言へ落ちたことを検証するとき、乱数で揺れないよう差し替える定数。
+_FIXED_LINE = "手が止まってますよ"
 
-class _StubGenerator:
-    def __init__(self, line: GeneratedLine) -> None:
-        self._line = line
-        self.seen: list[SpeechContext] = []
-        self.is_configured = True
-        self.model = "test-model"
 
-    async def generate(self, context: SpeechContext) -> GeneratedLine:
-        self.seen.append(context)
-        return self._line
+def _fixed_fallback(context: SpeechContext, *, rng: Any = None) -> str:
+    """テスト用の固定文言。``fallback_line`` の代わりに差し替える。"""
+    return _FIXED_LINE
 
 
 class _StubVoicevox:
@@ -78,31 +73,48 @@ class _StubScreenReader:
         return self._result
 
 
-def _install(client: TestClient, generator: Any, voicevox: Any, screen_reader: Any = None) -> None:
-    client.app.state.line_generator = generator
+class _RecordingReader(_StubScreenReader):
+    """読んだスクショに加え、渡された状況も記録する。パースの検証に使う。"""
+
+    def __init__(self, result: Any = READING) -> None:
+        super().__init__(result)
+        self.contexts: list[SpeechContext] = []
+
+    async def read(
+        self, png: bytes, context: SpeechContext, *, require_line: bool = True
+    ) -> ScreenReading:
+        self.contexts.append(context)
+        return await super().read(png, context, require_line=require_line)
+
+
+def _install(client: TestClient, voicevox: Any, screen_reader: Any | None = None) -> None:
+    """状態をスタブで置き換える。Claude 経路は廃止したので、画面読み取りと VOICEVOX だけを持つ。"""
     client.app.state.voicevox = voicevox
     client.app.state.screen_reader = screen_reader or _StubScreenReader(READING)
 
 
-def test_line_returns_the_generated_text(client: TestClient, auth: dict[str, str]) -> None:
-    generator = _StubGenerator(GeneratedLine(text="手が止まってますよ", from_llm=True))
-    _install(client, generator, _StubVoicevox())
+def test_line_without_a_screenshot_falls_back_to_a_fixed_line(
+    client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # カメラ経路などスクショが無いときは LLM を呼ばず、同封の固定文言に落とす。
+    monkeypatch.setattr(voice_router, "fallback_line", _fixed_fallback)
+    _install(client, _StubVoicevox())
 
     response = client.post("/voice/line", json={"idle_seconds": 300}, headers=auth)
 
     assert response.status_code == 200
     assert response.json() == {
-        "text": "手が止まってますよ",
-        "from_llm": True,
-        "fallback_reason": None,
+        "text": _FIXED_LINE,
+        "from_llm": False,
+        "fallback_reason": "固定文言(スクショ無し)",
         "screen": None,
         "screen_error": None,
     }
 
 
 def test_line_parses_every_signal(client: TestClient, auth: dict[str, str]) -> None:
-    generator = _StubGenerator(GeneratedLine(text="はい", from_llm=True))
-    _install(client, generator, _StubVoicevox())
+    reader = _RecordingReader()
+    _install(client, _StubVoicevox(), reader)
 
     client.post(
         "/voice/line",
@@ -113,11 +125,12 @@ def test_line_parses_every_signal(client: TestClient, auth: dict[str, str]) -> N
             "iphone": "active",
             "iphone_app": "YouTube",
             "vision": "sleeping",
+            "screenshot_png": PNG_B64,
         },
         headers=auth,
     )
 
-    context = generator.seen[0]
+    context = reader.contexts[0]
     assert context.idle_seconds == 120
     assert context.escalation is Escalation.EXPOSE
     assert context.frontmost_app == "Safari"
@@ -130,24 +143,29 @@ def test_unknown_enum_values_fall_back_to_defaults(
     client: TestClient, auth: dict[str, str]
 ) -> None:
     # 送り手と受け手の版がずれても喋り続ける方を選んでいる。
-    generator = _StubGenerator(GeneratedLine(text="はい", from_llm=True))
-    _install(client, generator, _StubVoicevox())
+    reader = _RecordingReader()
+    _install(client, _StubVoicevox(), reader)
 
     response = client.post(
         "/voice/line",
-        json={"idle_seconds": 1, "escalation": "未知", "vision": "未知"},
+        json={
+            "idle_seconds": 1,
+            "escalation": "未知",
+            "vision": "未知",
+            "screenshot_png": PNG_B64,
+        },
         headers=auth,
     )
 
     assert response.status_code == 200
-    assert generator.seen[0].escalation is Escalation.NUDGE
-    assert generator.seen[0].vision is VisionLabel.UNKNOWN
+    assert reader.contexts[0].escalation is Escalation.NUDGE
+    assert reader.contexts[0].vision is VisionLabel.UNKNOWN
     # iphone_app はキーごと無くてよい。
-    assert generator.seen[0].iphone_app is None
+    assert reader.contexts[0].iphone_app is None
 
 
 def test_invalid_idle_seconds_is_422(client: TestClient, auth: dict[str, str]) -> None:
-    _install(client, _StubGenerator(GeneratedLine(text="x", from_llm=True)), _StubVoicevox())
+    _install(client, _StubVoicevox())
 
     response = client.post("/voice/line", json={"idle_seconds": -5}, headers=auth)
 
@@ -155,7 +173,7 @@ def test_invalid_idle_seconds_is_422(client: TestClient, auth: dict[str, str]) -
 
 
 def test_speak_returns_base64_audio(client: TestClient, auth: dict[str, str]) -> None:
-    _install(client, _StubGenerator(GeneratedLine(text="やあ", from_llm=True)), _StubVoicevox())
+    _install(client, _StubVoicevox())
 
     body = client.post("/voice/speak", json={"idle_seconds": 60}, headers=auth).json()
 
@@ -164,33 +182,32 @@ def test_speak_returns_base64_audio(client: TestClient, auth: dict[str, str]) ->
 
 
 def test_speak_still_returns_the_line_when_the_engine_is_down(
-    client: TestClient, auth: dict[str, str]
+    client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # 喋れないことは検知や送信を止める理由にならないので、200 で返してテキストは渡す。
-    _install(
-        client,
-        _StubGenerator(GeneratedLine(text="やあ", from_llm=False, fallback_reason="キー未設定")),
-        _StubVoicevox(audio=None),
-    )
+    monkeypatch.setattr(voice_router, "fallback_line", _fixed_fallback)
+    _install(client, _StubVoicevox(audio=None))
 
     response = client.post("/voice/speak", json={"idle_seconds": 60}, headers=auth)
 
     assert response.status_code == 200
     body = response.json()
-    assert body["text"] == "やあ"
+    assert body["text"] == _FIXED_LINE
+    assert body["from_llm"] is False
     assert body["audio"] is None
     assert "繋がらない" in body["audio_error"]
 
 
 def test_status_reports_what_is_missing(client: TestClient, auth: dict[str, str]) -> None:
-    _install(
-        client, _StubGenerator(GeneratedLine(text="x", from_llm=True)), _StubVoicevox(audio=None)
-    )
+    # Claude は廃止したので、状態に出るのは画面読み取りと VOICEVOX だけ。
+    _install(client, _StubVoicevox(audio=None))
 
     body = client.get("/voice/status", headers=auth).json()
 
-    assert body["llm_configured"] is True
-    assert body["llm_model"] == "test-model"
+    # llm_configured / llm_model は macOS アプリが必須としてデコードするので、
+    # 形だけ残して無効にする(Claude 経路はもう無い)。
+    assert body["llm_configured"] is False
+    assert body["llm_model"] == ""
     assert body["screen_llm_configured"] is True
     assert body["screen_llm_model"] == "test-screen-model"
     assert body["voicevox_reachable"] is False
@@ -207,9 +224,8 @@ def test_voice_endpoints_need_a_token(client: TestClient) -> None:
 def test_a_screenshot_makes_the_line_from_the_screen(
     client: TestClient, auth: dict[str, str]
 ) -> None:
-    generator = _StubGenerator(GeneratedLine(text="使われないはず", from_llm=True))
     reader = _StubScreenReader(READING)
-    _install(client, generator, _StubVoicevox(), reader)
+    _install(client, _StubVoicevox(), reader)
 
     body = client.post(
         "/voice/line",
@@ -219,6 +235,7 @@ def test_a_screenshot_makes_the_line_from_the_screen(
 
     assert body["text"] == READING.line
     assert body["from_llm"] is True
+    assert body["fallback_reason"] is None
     assert body["screen"] == {
         "app": "YouTube",
         "activity": "料理動画",
@@ -228,18 +245,15 @@ def test_a_screenshot_makes_the_line_from_the_screen(
     assert reader.seen == [PNG]
     # 喋るときはセリフごと要る。
     assert reader.require_line == [True]
-    # 画面が読めたなら Claude は呼ばない。1 回の呼び出しで読み取りとセリフを賄う。
-    assert generator.seen == []
 
 
-def test_an_unreadable_screenshot_falls_back_to_the_text_generator(
-    client: TestClient, auth: dict[str, str]
+def test_an_unreadable_screenshot_falls_back_to_a_fixed_line(
+    client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 画面が読めないことは喋らない理由にならないので、理由だけ返して Claude に落とす。
-    generator = _StubGenerator(GeneratedLine(text="手が止まってますよ", from_llm=True))
+    # 画面が読めないことは喋らない理由にならないので、理由を載せて固定文言に落とす。
+    monkeypatch.setattr(voice_router, "fallback_line", _fixed_fallback)
     _install(
         client,
-        generator,
         _StubVoicevox(),
         _StubScreenReader(ScreenReadError("レート制限に当たった")),
     )
@@ -250,17 +264,20 @@ def test_an_unreadable_screenshot_falls_back_to_the_text_generator(
         headers=auth,
     ).json()
 
-    assert body["text"] == "手が止まってますよ"
+    assert body["text"] == _FIXED_LINE
+    assert body["from_llm"] is False
+    assert body["fallback_reason"] == "レート制限に当たった"
     assert body["screen"] is None
     assert body["screen_error"] == "レート制限に当たった"
-    assert generator.seen
 
 
-def test_without_a_gemini_key_it_says_so(client: TestClient, auth: dict[str, str]) -> None:
-    generator = _StubGenerator(GeneratedLine(text="手が止まってますよ", from_llm=True))
+def test_without_a_gemini_key_it_says_so(
+    client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # キーが無くても黙らない。理由を付けて固定文言に落とす。
+    monkeypatch.setattr(voice_router, "fallback_line", _fixed_fallback)
     _install(
         client,
-        generator,
         _StubVoicevox(),
         _StubScreenReader(READING, is_configured=False),
     )
@@ -271,13 +288,15 @@ def test_without_a_gemini_key_it_says_so(client: TestClient, auth: dict[str, str
         headers=auth,
     ).json()
 
-    assert body["text"] == "手が止まってますよ"
+    assert body["text"] == _FIXED_LINE
+    assert body["from_llm"] is False
+    assert body["fallback_reason"] == "GEMINI_API_KEY が未設定"
     assert body["screen"] is None
     assert body["screen_error"] == "GEMINI_API_KEY が未設定"
 
 
 def test_a_broken_base64_screenshot_is_422(client: TestClient, auth: dict[str, str]) -> None:
-    _install(client, _StubGenerator(GeneratedLine(text="x", from_llm=True)), _StubVoicevox())
+    _install(client, _StubVoicevox())
 
     response = client.post(
         "/voice/line",
@@ -290,7 +309,7 @@ def test_a_broken_base64_screenshot_is_422(client: TestClient, auth: dict[str, s
 
 
 def test_a_non_png_screenshot_is_422(client: TestClient, auth: dict[str, str]) -> None:
-    _install(client, _StubGenerator(GeneratedLine(text="x", from_llm=True)), _StubVoicevox())
+    _install(client, _StubVoicevox())
 
     response = client.post(
         "/voice/line",
@@ -306,8 +325,7 @@ def test_a_non_png_screenshot_is_422(client: TestClient, auth: dict[str, str]) -
 
 
 def test_speak_uses_the_screen_too(client: TestClient, auth: dict[str, str]) -> None:
-    generator = _StubGenerator(GeneratedLine(text="使われないはず", from_llm=True))
-    _install(client, generator, _StubVoicevox(), _StubScreenReader(READING))
+    _install(client, _StubVoicevox(), _StubScreenReader(READING))
 
     body = client.post(
         "/voice/speak",
@@ -331,8 +349,7 @@ def test_a_slow_screen_read_falls_back_to_a_fixed_line(
     client: TestClient, auth: dict[str, str], short_deadline: None
 ) -> None:
     # 呼び出し元は 60 秒で諦めるので、それより手前で必ず返す。
-    generator = _StubGenerator(GeneratedLine(text="使われないはず", from_llm=True))
-    _install(client, generator, _StubVoicevox(), _StubScreenReader(READING, delay=5.0))
+    _install(client, _StubVoicevox(), _StubScreenReader(READING, delay=5.0))
 
     response = client.post(
         "/voice/speak",
@@ -356,8 +373,7 @@ def test_a_slow_synthesis_also_falls_back(
     client: TestClient, auth: dict[str, str], short_deadline: None
 ) -> None:
     # 画面が読めても合成で詰まれば同じ。上限は読み取りと合成の合計にかかる。
-    generator = _StubGenerator(GeneratedLine(text="使われないはず", from_llm=True))
-    _install(client, generator, _StubVoicevox(delay=5.0), _StubScreenReader(READING))
+    _install(client, _StubVoicevox(delay=5.0), _StubScreenReader(READING))
 
     body = client.post(
         "/voice/speak",
@@ -374,8 +390,7 @@ def test_a_slow_synthesis_also_falls_back(
 def test_line_falls_back_when_it_is_too_slow(
     client: TestClient, auth: dict[str, str], short_deadline: None
 ) -> None:
-    generator = _StubGenerator(GeneratedLine(text="使われないはず", from_llm=True))
-    _install(client, generator, _StubVoicevox(), _StubScreenReader(READING, delay=5.0))
+    _install(client, _StubVoicevox(), _StubScreenReader(READING, delay=5.0))
 
     response = client.post(
         "/voice/line",
@@ -399,10 +414,9 @@ def test_screen_reads_the_screenshot_without_making_a_line(
     client: TestClient, auth: dict[str, str]
 ) -> None:
     # 同封済みの音声を鳴らすモード用。Discord の文面の材料だけが要る。
-    generator = _StubGenerator(GeneratedLine(text="使われないはず", from_llm=True))
     voicevox = _StubVoicevox()
     reader = _StubScreenReader(READING)
-    _install(client, generator, voicevox, reader)
+    _install(client, voicevox, reader)
 
     response = client.post(
         "/voice/screen",
@@ -418,27 +432,13 @@ def test_screen_reads_the_screenshot_without_making_a_line(
     assert reader.seen == [PNG]
     # セリフも音声も作らない。セリフが壊れていても見立てを捨てないよう、読み取りにも要求しない。
     assert reader.require_line == [False]
-    assert generator.seen == []
 
 
 def test_screen_passes_the_situation_to_the_reader(
     client: TestClient, auth: dict[str, str]
 ) -> None:
-    class _Recording(_StubScreenReader):
-        def __init__(self) -> None:
-            super().__init__(READING)
-            self.contexts: list[SpeechContext] = []
-
-        async def read(
-            self, png: bytes, context: SpeechContext, *, require_line: bool = True
-        ) -> ScreenReading:
-            self.contexts.append(context)
-            return await super().read(png, context, require_line=require_line)
-
-    reader = _Recording()
-    _install(
-        client, _StubGenerator(GeneratedLine(text="x", from_llm=True)), _StubVoicevox(), reader
-    )
+    reader = _RecordingReader()
+    _install(client, _StubVoicevox(), reader)
 
     client.post(
         "/voice/screen",
@@ -462,9 +462,7 @@ def test_screen_passes_the_situation_to_the_reader(
 def test_screen_without_a_screenshot_says_so(client: TestClient, auth: dict[str, str]) -> None:
     # 読めないことは Discord へ送るのをやめる理由にならないので、200 で理由だけ返す。
     reader = _StubScreenReader(READING)
-    _install(
-        client, _StubGenerator(GeneratedLine(text="x", from_llm=True)), _StubVoicevox(), reader
-    )
+    _install(client, _StubVoicevox(), reader)
 
     response = client.post("/voice/screen", json={"idle_seconds": 300}, headers=auth)
 
@@ -477,7 +475,6 @@ def test_screen_without_a_screenshot_says_so(client: TestClient, auth: dict[str,
 def test_screen_without_a_gemini_key_says_so(client: TestClient, auth: dict[str, str]) -> None:
     _install(
         client,
-        _StubGenerator(GeneratedLine(text="x", from_llm=True)),
         _StubVoicevox(),
         _StubScreenReader(READING, is_configured=False),
     )
@@ -497,7 +494,6 @@ def test_screen_returns_the_reason_when_the_read_fails(
 ) -> None:
     _install(
         client,
-        _StubGenerator(GeneratedLine(text="x", from_llm=True)),
         _StubVoicevox(),
         _StubScreenReader(ScreenReadError("レート制限に当たった")),
     )
@@ -518,7 +514,6 @@ def test_screen_falls_back_when_the_read_is_too_slow(
     monkeypatch.setattr(voice_router, "SCREEN_DEADLINE_SECONDS", 0.05)
     _install(
         client,
-        _StubGenerator(GeneratedLine(text="x", from_llm=True)),
         _StubVoicevox(),
         _StubScreenReader(READING, delay=5.0),
     )
@@ -535,7 +530,7 @@ def test_screen_falls_back_when_the_read_is_too_slow(
 
 
 def test_screen_rejects_a_broken_screenshot(client: TestClient, auth: dict[str, str]) -> None:
-    _install(client, _StubGenerator(GeneratedLine(text="x", from_llm=True)), _StubVoicevox())
+    _install(client, _StubVoicevox())
 
     response = client.post(
         "/voice/screen",
