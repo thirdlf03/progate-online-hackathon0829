@@ -13,10 +13,15 @@ final class StubPetMenuActions: ObservableObject, PetMenuActions {
     var voiceMode: VoiceMode = .bundled
     var focusStreakIntervalSeconds: TimeInterval = 900
     var isFastThresholds = false
+    var escapeMenuState: EscapeMenuState = .hidden
     /// 「集中継続のセリフを再現」が押された回数。
     private(set) var focusStreakReplays = 0
     /// 「実際に進める」で投げられた操作。
     private(set) var detectionSteps: [DetectionDebugStep] = []
+    /// 「どうしても終了する…」が押された回数。
+    private(set) var escapeDialogOpens = 0
+    /// 「終了を取り消す」が押された回数。
+    private(set) var escapeCancels = 0
 
     func startWatching() {}
     func stopWatching() {}
@@ -32,4 +37,6 @@ final class StubPetMenuActions: ObservableObject, PetMenuActions {
     func setFastThresholds(_ enabled: Bool) { isFastThresholds = enabled }
     func replayFocusStreak() { focusStreakReplays += 1 }
     func runDetectionStep(_ step: DetectionDebugStep) { detectionSteps.append(step) }
+    func openEscapeDialog() { escapeDialogOpens += 1 }
+    func cancelEscape() { escapeCancels += 1 }
 }

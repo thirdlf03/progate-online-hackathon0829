@@ -84,6 +84,30 @@ public enum PetMenuEntries {
                 action: { actions.setPhotobombEnabled(!actions.isPhotobombEnabled) }
             ),
         ]
+        // 執行猶予脱出は quitLock が ON でロック中のときだけ出す(#52)。
+        switch actions.escapeMenuState {
+        case .available:
+            entries.append(
+                .item(title: "どうしても終了する…", action: { actions.openEscapeDialog() })
+            )
+        case .coolingDown(let remaining):
+            // 冷却中は押しても何もしない。理由はタイトルに載せて伝える。
+            entries.append(
+                .item(
+                    title: "どうしても終了する(あと\(EscapePolicy.durationDescription(remaining))で使えます)",
+                    action: {}
+                )
+            )
+        case .countingDown(let remaining):
+            entries.append(
+                .item(
+                    title: "終了を取り消す(あと\(EscapePolicy.durationDescription(remaining)))",
+                    action: { actions.cancelEscape() }
+                )
+            )
+        case .hidden:
+            break
+        }
         // デバッグメニューは開発中だけ出す。一般ユーザーの右クリックから消すのと同時に、
         // その直前の区切り線も消して「実在しない見た目の項目」を残さない。
         if actions.isDebugMenuVisible {
