@@ -38,12 +38,10 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     func startBreak()
     /// 休憩を終える。
     func endBreak()
-    /// セーフティー設定の画面を開く。
-    func openSafetySettings()
-    /// Discord 設定の画面を開く。
-    func openDiscordSettings()
-    /// 権限の確認画面を開く。
-    func openPermissions()
+    /// 設定の画面(セーフティー / Discord / 権限のタブ)を開く。
+    ///
+    /// - Parameter tab: 開くタブ。`nil` なら前回開いていたタブのまま出す(初回は `.safety`)。
+    func openSettings(tab: SettingsTab?)
     /// 状態パネルの表示を切り替える。
     func toggleStatusPanel()
     /// スクショへの写り込みを入れる / 切る。

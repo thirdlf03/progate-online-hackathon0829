@@ -30,10 +30,10 @@ public enum PetMenuEntries {
     ) -> [PetMenuEntry] {
         let pet = presenter.controller
         var entries: [PetMenuEntry] = [
-            // 最上段はセーフティーモードの表示。押すと設定画面(中身は #54)へ。
+            // 最上段はセーフティーモードの表示。押すと設定画面のセーフティータブへ直行する。
             .item(
                 title: actions.safetyStatusLine,
-                action: { actions.openSafetySettings() }
+                action: { actions.openSettings(tab: .safety) }
             ),
             .separator,
             .item(
@@ -61,19 +61,6 @@ public enum PetMenuEntries {
                 }
             ),
             .separator,
-            .item(
-                title: "セーフティー設定…",
-                action: { actions.openSafetySettings() }
-            ),
-            .item(
-                title: "Discord 設定…",
-                action: { actions.openDiscordSettings() }
-            ),
-            .item(
-                title: "権限の確認…",
-                action: { actions.openPermissions() }
-            ),
-            .separator,
             .submenu(
                 title: "サイズ",
                 entries: PetScale.allCases.map { item -> PetMenuEntry in
@@ -90,14 +77,16 @@ public enum PetMenuEntries {
                 action: { pet.setVoiceEnabled(!pet.isVoiceEnabled) }
             ),
             .item(
-                title: "状態パネルを表示",
-                isChecked: actions.isStatusPanelVisible,
-                action: { actions.toggleStatusPanel() }
-            ),
-            .item(
                 title: "スクショに写り込む",
                 isChecked: actions.isPhotobombEnabled,
                 action: { actions.setPhotobombEnabled(!actions.isPhotobombEnabled) }
+            ),
+            .separator,
+            // じっくり決める設定(セーフティー / Discord / 権限)はこの 1 つに寄せてある。
+            // タブは前回開いていたものを引き継ぐので、ここでは指定しない。
+            .item(
+                title: "設定…",
+                action: { actions.openSettings(tab: nil) }
             ),
         ]
         // 執行猶予脱出は quitLock が ON でロック中のときだけ出す(#52)。

@@ -65,8 +65,8 @@ struct PetContextMenuTests {
         #expect(menu.items[1].isSeparatorItem)
     }
 
-    @Test("「セーフティー設定…」は Discord 設定の直前に並ぶ")
-    func settingsItemSitsRightBeforeDiscordSettings() throws {
+    @Test("「設定…」は「スクショに写り込む」の後の区切り線に続いて並ぶ")
+    func settingsItemSitsAfterTheQuickToggles() throws {
         // 実機の表示設定をテスト同士で共有しないよう、実行のたびに空の UserDefaults を使う。
         let suiteName = "mihari.test.petContextMenu.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -77,9 +77,15 @@ struct PetContextMenuTests {
             PetMenuEntries.make(actions: actions, presenter: presenter)
         )
         let titles = menu.items.map(\.title)
-        let discordIndex = try #require(titles.firstIndex(of: "Discord 設定…"))
+        let settingsIndex = try #require(titles.firstIndex(of: "設定…"))
 
-        #expect(titles[discordIndex - 1] == "セーフティー設定…")
+        #expect(menu.items[settingsIndex - 1].isSeparatorItem)
+        #expect(titles[settingsIndex - 2] == "スクショに写り込む")
+        // 個別の設定項目は「設定…」のタブへ寄せたので、通常メニューには残っていない。
+        #expect(!titles.contains("セーフティー設定…"))
+        #expect(!titles.contains("Discord 設定…"))
+        #expect(!titles.contains("権限の確認…"))
+        #expect(!titles.contains("状態パネルを表示"))
     }
 
     @Test("自動での有効・無効判定に任せず、明示しなければ押せるままにする")

@@ -25,17 +25,25 @@ final class StubPetMenuActions: ObservableObject, PetMenuActions {
     /// 「終了を取り消す」が押された回数。
     private(set) var escapeCancels = 0
     /// 設定画面を開いた回数。
-    private(set) var safetySettingsOpens = 0
+    private(set) var settingsOpens = 0
+    /// 最後に `openSettings(tab:)` に渡されたタブ。`nil` は「前回のタブのまま」。
+    private(set) var lastSettingsTab: SettingsTab?
+    /// 「状態パネルを表示」が押された回数。
+    private(set) var statusPanelToggles = 0
 
     func startWatching() {}
     func stopWatching() {}
     func stampAttendance() {}
     func startBreak() {}
     func endBreak() {}
-    func openSafetySettings() { safetySettingsOpens += 1 }
-    func openDiscordSettings() {}
-    func openPermissions() {}
-    func toggleStatusPanel() {}
+    func openSettings(tab: SettingsTab?) {
+        settingsOpens += 1
+        lastSettingsTab = tab
+    }
+    func toggleStatusPanel() {
+        statusPanelToggles += 1
+        isStatusPanelVisible.toggle()
+    }
     func setPhotobombEnabled(_ enabled: Bool) { isPhotobombEnabled = enabled }
     func setVoiceMode(_ mode: VoiceMode) { voiceMode = mode }
     func setFocusStreakInterval(_ seconds: TimeInterval) { focusStreakIntervalSeconds = seconds }
