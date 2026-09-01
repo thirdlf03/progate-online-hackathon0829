@@ -77,20 +77,23 @@
 
 ### メニュー
 
-右クリックメニュー(`PetContextMenu`)とメニューバーの「ペット」(`PetMenuContent`)は `PetMenuEntries.make` から作るので中身が同じ。現行は 8 項目と「デバッグ」サブメニュー。
+右クリックメニュー(`PetContextMenu`)とメニューバーの「ペット」(`PetMenuContent`)は `PetMenuEntries.make` から作るので中身が同じ。すぐ触りたい操作だけを並べ、じっくり決める設定は「設定…」の 3 タブに寄せてある。現行は 7 項目 +「サイズ」サブメニューと「デバッグ」サブメニュー。
 
 | 項目 | 内容 |
 | --- | --- |
 | 監視を止める / 監視を再開する | `stopWatching()` / `startWatching()`。「止める」は休憩に触れない |
 | 在席スタンプを押す | `stampAttendance()`。Touch ID で在席を証明する。指を差し出すカットインとセリフの演出が付く(後述) |
 | 休憩する(15 分) / 休憩を終える | `startBreak()` / `endBreak()` |
-| Discord 設定… | `openDiscordSettings()` |
-| 権限の確認… | `openPermissions()` |
 | サイズ(サブメニュー) | 小 = 0.5 / 中 = 0.75 / 大 = 1.0。チェック式 |
 | 声を出す | チェック式。`pet.setVoiceEnabled(!isVoiceEnabled)` |
-| 状態パネルを表示 | チェック式。`toggleStatusPanel()` |
+| スクショに写り込む | チェック式。`setPhotobombEnabled(!isPhotobombEnabled)` |
+| 設定… | `openSettings(tab: nil)`。前回開いていたタブのまま設定ウィンドウを出す(初回は「セーフティー」) |
 
-区切り線は「休憩する」の後、「権限の確認…」の後、「状態パネルを表示」の後(デバッグの手前)の 3 本。`autoenablesItems = false`。
+最上段はセーフティーモードの 1 行表示(`safetyStatusLine`)で、押すと `openSettings(tab: .safety)` でセーフティータブが開く。
+
+区切り線はモード行の後、「休憩する」の後、「スクショに写り込む」の後(「設定…」の手前)の 3 本。`autoenablesItems = false`。
+
+設定ウィンドウ(`SettingsView`・題は「設定」・720 × 760)は「セーフティー」(`SafetyModeView`)「Discord」(`DiscordView`)「権限」(`OnboardingView`)の 3 タブ。選ばれているタブは `SettingsTabSelection` が持ち、ウィンドウを閉じても覚えている。どのタブの「閉じる」もウィンドウ全体を閉じる。
 
 #### デバッグ
 
@@ -107,6 +110,7 @@
 | 集中継続の間隔(サブメニュー) | 15 分 / 1 分。チェック式。`DetectionThresholds.focusStreakIntervalSeconds` を差し替える |
 | 集中継続のセリフを再現 | `LivePetPresenter.sayFocusStreak()`。褒めるセリフを 1 本喋らせる |
 | ひとりごとを喋る(声あり) | `say("デバッグのテストです。聞こえていますか?")`。読み上げも通る |
+| 状態パネルを表示 | チェック式。`toggleStatusPanel()`。本番では出さないのでここに置いてある |
 
 アニメーションの項目名は `waiting(待つ)` のように `rawValue` と日本語ラベル(`PetAnimation.debugLabel`)を並べる。
 
@@ -1029,6 +1033,7 @@ LLM が使えない・失敗した・遅すぎたときの保険。`fallback_lin
 | `desktop/Sources/MihariCore/Pet/PetSpeechBubbleView.swift` | 吹き出しの見た目と はい / いいえ のボタン |
 | `desktop/Sources/MihariCore/Pet/PetSpriteView.swift` | クリック・ダブルクリック・ドラッグの判定 |
 | `desktop/Sources/MihariCore/Pet/PetMenuEntry.swift` | メニューの並び |
+| `desktop/Sources/MihariCore/Views/SettingsView.swift` | 設定ウィンドウのタブと選択状態 |
 | `desktop/Sources/MihariCore/Pet/PetVoice.swift` | ひとりごとの VOICEVOX 読み上げ / 用意済み音声の再生 |
 | `desktop/Sources/MihariCore/Voice/SpeechPriority.swift` | ひとりごとと検知のセリフの取り合いの判定 |
 | `desktop/Sources/MihariCore/Voice/VoiceMode.swift` | 音声モード(`bundled` / `live`)と保存 |

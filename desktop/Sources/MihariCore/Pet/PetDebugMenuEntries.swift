@@ -92,6 +92,13 @@ public enum PetDebugMenuEntries {
                 title: "ひとりごとを喋る(声あり)",
                 action: { pet.say("デバッグのテストです。聞こえていますか?") }
             ),
+            .separator,
+            // 本番では出さないので、通常メニューではなくこちらに置く。
+            .item(
+                title: "状態パネルを表示",
+                isChecked: actions.isStatusPanelVisible,
+                action: { actions.toggleStatusPanel() }
+            ),
         ]
     }
 

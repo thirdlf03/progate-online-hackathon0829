@@ -104,6 +104,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         }
     )
     private let windows = AuxiliaryWindows()
+    /// 設定ウィンドウで選ばれているタブ。ウィンドウを閉じても覚えておき、
+    /// 次に `openSettings(tab: nil)` で開いたときは前回のタブのまま出す。
+    private let settingsTabSelection = SettingsTabSelection()
     private let statusPanel = StatusPanelController()
     /// 監視中はディスプレイ/システムのアイドルスリープを止める。
     private let sleepPreventer: SleepPreventing
@@ -222,7 +225,7 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         } else if !permissions.isRequiredSatisfied {
             // 必須権限が欠けているうちは見張らない。
             // 撮れも送れもしない状態で常駐しても、黙って失敗し続けるだけになる。
-            showPermissionWindow(canStart: true)
+            showPermissionWindow()
         } else {
             begin()
         }
@@ -728,29 +731,21 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     // MARK: - ウィンドウ
 
-    /// 権限の確認画面を出す。
+    /// 起動時の「始める」フロー用に、権限の確認画面を出す。
     ///
-    /// - Parameter canStart: まだ見張り始めていないなら true。「始める」ボタンを出す。
-    ///   すでに見張っているときは押す意味がないので「閉じる」にする。
-    private func showPermissionWindow(canStart: Bool) {
+    /// 必須権限が欠けていて見張り始められないときだけ出す初回導線。設定としての権限確認は
+    /// 設定ウィンドウの「権限」タブ側にあるので、こちらは「始める」ボタンだけを出す。
+    private func showPermissionWindow() {
         windows.showPermissions {
-            if canStart {
-                OnboardingView(
-                    model: permissions,
-                    tunneld: tunneld,
-                    onStart: { [weak self] in
-                        guard let self else { return }
-                        windows.closePermissions()
-                        begin()
-                    }
-                )
-            } else {
-                OnboardingView(
-                    model: permissions,
-                    tunneld: tunneld,
-                    onClose: { [weak self] in self?.windows.closePermissions() }
-                )
-            }
+            OnboardingView(
+                model: permissions,
+                tunneld: tunneld,
+                onStart: { [weak self] in
+                    guard let self else { return }
+                    windows.closePermissions()
+                    begin()
+                }
+            )
         }
     }
 
@@ -868,21 +863,35 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         detection.endBreak()
     }
 
-    public func openDiscordSettings() {
-        windows.showDiscord { DiscordView(discord: discord, daemon: daemon) }
-    }
-
-    /// セーフティーの設定画面を開く。監視中に変えた `isWatching` を画面に映すため、
-    /// コーディネーターを観察するラッパー経由で `SafetyModeView` を組み立て直す。
-    public func openSafetySettings() {
-        windows.showSafety {
-            SafetySettingsHost(coordinator: self)
+    /// 設定画面(セーフティー / Discord / 権限のタブ)を開く。
+    ///
+    /// セーフティータブは、監視中に変えた `isWatching` を画面に映すため、コーディネーターを
+    /// 観察するラッパー経由で `SafetyModeView` を組み立て直す。
+    ///
+    /// - Parameter tab: 開くタブ。`nil` なら前回開いていたタブのまま出す(初回は `.safety`)。
+    public func openSettings(tab: SettingsTab?) {
+        if let tab { settingsTabSelection.tab = tab }
+        windows.showSettings {
+            SettingsView(
+                selection: settingsTabSelection,
+                safety: { SafetySettingsHost(coordinator: self) },
+                discord: { DiscordView(discord: discord, daemon: daemon) },
+                permissions: {
+                    // 設定から開く権限タブは「始める」ではなく「閉じる」。起動時の
+                    // 「始める」フローは `showPermissionWindow()` の側に残してある。
+                    OnboardingView(
+                        model: permissions,
+                        tunneld: tunneld,
+                        onClose: { [weak self] in self?.closeSettings() }
+                    )
+                }
+            )
         }
     }
 
-    /// セーフティーの設定画面を閉じる。`SafetyModeView` の「閉じる」から呼ばれる。
-    func closeSafety() {
-        windows.closeSafety()
+    /// 設定画面を閉じる。`SafetyModeView` と `OnboardingView` の「閉じる」から呼ばれる。
+    func closeSettings() {
+        windows.closeSettings()
     }
 
     /// 設定画面で ON にした機能の事後処理。オンボーディング側(`OnboardingFlowView`)
@@ -896,10 +905,6 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
                 await tunneld.install()
             }
         }
-    }
-
-    public func openPermissions() {
-        showPermissionWindow(canStart: !hasBegun)
     }
 
     public func toggleStatusPanel() {
@@ -1344,7 +1349,7 @@ private struct SafetySettingsHost: View {
             isWatching: coordinator.isWatching,
             lockedUntil: coordinator.safetyLockUntil,
             context: .settings(onClose: { [weak coordinator] in
-                coordinator?.closeSafety()
+                coordinator?.closeSettings()
             }),
             onFeatureEnabled: { [weak coordinator] feature in
                 coordinator?.handleFeatureEnabled(feature)

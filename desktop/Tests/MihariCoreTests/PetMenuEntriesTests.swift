@@ -31,6 +31,16 @@ struct PetMenuEntriesTests {
         return nil
     }
 
+    /// タイトルの一致するサブメニューの中身を探す。
+    private func findSubmenu(_ title: String, in entries: [PetMenuEntry]) -> [PetMenuEntry]? {
+        for entry in entries {
+            if case .submenu(let submenuTitle, let children) = entry, submenuTitle == title {
+                return children
+            }
+        }
+        return nil
+    }
+
     @Test("先頭はモード行で、その直後に区切り線が来る")
     func firstEntriesAreTheModeLine() throws {
         let presenter = makePresenter()
@@ -84,7 +94,7 @@ struct PetMenuEntriesTests {
         let separatorCount = entries.reduce(into: 0) { count, entry in
             if case .separator = entry { count += 1 }
         }
-        // (モード)と(監視 / 在席 / 休憩)と(Discord / 権限)の区切り 3 本だけになる。
+        // (モード行)と(監視 / 在席 / 休憩)と(サイズ / 声 / 写り込み)の後ろの 3 本だけになる。
         #expect(separatorCount == 3)
 
         // 見える設定なら(既定どおり)デバッグサブメニューが最後に付く。
@@ -136,5 +146,63 @@ struct PetMenuEntriesTests {
         let hidden = PetMenuEntries.make(actions: actions, presenter: presenter)
         #expect(findItem("どうしても終了する…", in: hidden) == nil)
         #expect(findItem("終了を取り消す", in: hidden) == nil)
+    }
+
+    @Test("じっくり決める設定は「設定…」1 つに寄り、個別の項目は通常メニューから消える")
+    func settingsAreCollapsedIntoOneEntry() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+
+        let entries = PetMenuEntries.make(actions: actions, presenter: presenter)
+
+        #expect(findItem("設定…", in: entries) != nil)
+        #expect(findItem("セーフティー設定…", in: entries) == nil)
+        #expect(findItem("Discord 設定…", in: entries) == nil)
+        #expect(findItem("権限の確認…", in: entries) == nil)
+        #expect(findItem("状態パネルを表示", in: entries) == nil)
+    }
+
+    @Test("モード行を押すとセーフティータブを指して設定画面が開く")
+    func modeLineOpensTheSafetyTab() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+
+        let modeLine = try #require(
+            findItem(actions.safetyStatusLine, in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        modeLine.action()
+
+        #expect(actions.settingsOpens == 1)
+        #expect(actions.lastSettingsTab == .safety)
+    }
+
+    @Test("「設定…」を押すとタブを指定せずに設定画面が開く")
+    func settingsEntryKeepsTheLastTab() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+
+        let settings = try #require(
+            findItem("設定…", in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        settings.action()
+
+        #expect(actions.settingsOpens == 1)
+        #expect(actions.lastSettingsTab == nil)
+    }
+
+    @Test("「状態パネルを表示」はデバッグサブメニューの中にある")
+    func statusPanelEntryLivesInTheDebugSubmenu() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+        actions.isDebugMenuVisible = true
+
+        let entries = PetMenuEntries.make(actions: actions, presenter: presenter)
+        let debug = try #require(findSubmenu("デバッグ", in: entries))
+        let statusPanel = try #require(findItem("状態パネルを表示", in: debug))
+
+        #expect(statusPanel.isChecked == false)
+        statusPanel.action()
+        #expect(actions.statusPanelToggles == 1)
+        #expect(actions.isStatusPanelVisible)
     }
 }

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// ふだんは出さない補助ウィンドウ(権限 / Discord 設定 / デバッグ UI)の置き場。
+/// ふだんは出さない補助ウィンドウ(設定 / 権限 / 最初の設定 / デバッグ UI / 脱出)の置き場。
 ///
 /// Mihari の本体はデスクトップのペットで、ウィンドウは必要になったときだけ出す。
 /// そのため SwiftUI の `WindowGroup` は使わず、ここで `NSWindow` を直接組み立てて使い回す。
@@ -11,14 +11,14 @@ final class AuxiliaryWindows {
 
     private var permissions: NSWindow?
     private var onboarding: NSWindow?
-    private var safety: NSWindow?
-    private var discord: NSWindow?
+    private var settings: NSWindow?
     private var debug: NSWindow?
     private var escape: NSWindow?
 
-    /// 権限の確認画面を出す(すでに出ていれば中身を差し替えて前面へ)。
+    /// 起動時の「始める」フロー用の権限の確認画面を出す(すでに出ていれば中身を差し替えて前面へ)。
     ///
-    /// 「始める」と「閉じる」でボタンが変わるため、開くたびに中身を作り直す。
+    /// 設定としての権限確認は設定ウィンドウの「権限」タブ側にある。こちらは初回導線専用で、
+    /// 出す中身は「始める」ボタン付きの `OnboardingView` の 1 種類だけ。
     func showPermissions<Content: View>(@ViewBuilder content: () -> Content) {
         permissions = present(
             permissions,
@@ -49,29 +49,24 @@ final class AuxiliaryWindows {
         onboarding?.close()
     }
 
-    /// セーフティーの設定画面(「モードを選ぶ画面」と同じ並び)を出す。
-    func showSafety<Content: View>(@ViewBuilder content: () -> Content) {
-        safety = present(
-            safety,
-            title: "セーフティー設定",
-            size: NSSize(width: 640, height: 720),
+    /// 設定画面(セーフティー / Discord / 権限のタブ)を出す。
+    ///
+    /// 幅は「権限」タブが一番要る。`PermissionRow` が説明の列に `minWidth: 260` を敷き、
+    /// その右に「許可を求める」「システム設定を開く」の 2 ボタンが固定幅で並ぶため、
+    /// 640(旧セーフティー設定)ではボタンが押し出される。720 なら 3 タブとも収まる。
+    /// 高さは、一番縦に長いセーフティーの旧 720 にタブバーぶんを足して 760 にする。
+    func showSettings<Content: View>(@ViewBuilder content: () -> Content) {
+        settings = present(
+            settings,
+            title: "設定",
+            size: NSSize(width: 720, height: 760),
             content: content()
         )
     }
 
-    /// セーフティーの設定画面を閉じる。出していなければ何もしない。
-    func closeSafety() {
-        safety?.close()
-    }
-
-    /// Discord 設定の画面を出す。
-    func showDiscord<Content: View>(@ViewBuilder content: () -> Content) {
-        discord = present(
-            discord,
-            title: "Discord 設定",
-            size: NSSize(width: 640, height: 720),
-            content: content()
-        )
+    /// 設定画面を閉じる。出していなければ何もしない。
+    func closeSettings() {
+        settings?.close()
     }
 
     /// 検証用の 10 タブ画面を出す。`MIHARI_DEBUG_UI=1` のときだけ使う。
