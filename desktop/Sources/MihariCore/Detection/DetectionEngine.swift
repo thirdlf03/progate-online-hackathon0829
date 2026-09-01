@@ -167,6 +167,10 @@ public final class DetectionEngine: ObservableObject {
 
     public var actions = Actions()
 
+    /// セーフティートグル。証拠の取り先と Discord 投稿の可否をここで見る。
+    /// `AppCoordinator.wireDetection()` が `safety.gate` を渡す。
+    public var safetyGate: SafetyGate = .allowAll
+
     /// iPhone の様子。SSE で流れてくる値を外から入れてもらう。
     public var iphoneState: SpeechRequest.IPhoneState = .unreachable
 
@@ -334,7 +338,7 @@ public final class DetectionEngine: ObservableObject {
         // 最終警告のあとも動かない。晒しに進む。
         let decision = DetectionDecision(
             state: .exposing,
-            evidence: EvidenceKind.forEvidence(iphone: signals.iphone),
+            evidence: EvidenceKind.forEvidence(iphone: signals.iphone, gate: safetyGate),
             reason: "最終警告のあとも Mac が \(seconds: signals.macIdleSeconds) 無操作"
         )
         state = .exposing
@@ -553,15 +557,16 @@ public final class DetectionEngine: ObservableObject {
             notes.append("音楽を止めて聞かせた")
         }
 
-        if let data {
+        // 証拠が取れても取れなくても、文面だけは投稿する。
+        // 撮る先のトグルが OFF なら証拠は無いが、サボった事実は伝えられる。
+        if safetyGate.isEnabled(.discordExposure) {
             let facts = discordFacts(evidence: kind, signals: signals, label: label, screen: screen)
-            let sent = await actions.post(
-                DiscordMessageComposer.compose(facts),
-                data,
-                kind.filename,
-                true
-            )
+            let filename = data == nil ? EvidenceKind.none.filename : kind.filename
+            let sent = await actions.post(DiscordMessageComposer.compose(facts), data, filename, true)
             notes.append(sent ? "Discord に送った" : "Discord に送れなかった")
+        } else {
+            // トグルが OFF なら投稿しない。晒しの段階そのものは従来どおり進める。
+            notes.append("Discord に晒す が OFF なので投稿しない")
         }
 
         record(decision, outcome: notes.joined(separator: " / "), at: now)
@@ -623,7 +628,7 @@ public final class DetectionEngine: ObservableObject {
         let waiting = now.timeIntervalSince(since)
         let kind: BundledVoiceKind = withEvidence ? .clingyEvidence : Self.clingyKind(count: count)
         let spoken = bundledSpeech(for: kind)
-        let evidence = withEvidence ? EvidenceKind.forEvidence(iphone: signals.iphone) : .none
+        let evidence = withEvidence ? EvidenceKind.forEvidence(iphone: signals.iphone, gate: safetyGate) : .none
         let decision = DetectionDecision(
             state: state,
             evidence: evidence,
@@ -659,8 +664,18 @@ public final class DetectionEngine: ObservableObject {
         } else {
             body = DiscordMessageComposer.clingy(line: text, waitingFor: waiting)
         }
-        let sent = await actions.post(body, data, evidence.filename, true)
-        notes.append(sent ? "Discord に送った" : "Discord に送れなかった")
+        if safetyGate.isEnabled(.discordExposure) {
+            let sent = await actions.post(
+                body,
+                data,
+                data == nil ? EvidenceKind.none.filename : evidence.filename,
+                true
+            )
+            notes.append(sent ? "Discord に送った" : "Discord に送れなかった")
+        } else {
+            // 撮り直しの投稿もトグルが OFF ならしない。状態は従来どおり進める。
+            notes.append("Discord に晒す が OFF なので投稿しない")
+        }
 
         record(decision, outcome: notes.joined(separator: " / "), at: now)
         return decision
@@ -686,8 +701,17 @@ public final class DetectionEngine: ObservableObject {
         )
         // 送る前に畳む。送信を待っているあいだの次のティックで二重に投げないため。
         finishEpisode(line: text, audio: spoken?.audio)
-        let sent = await actions.post(text, nil, EvidenceKind.none.filename, false)
-        record(decision, outcome: sent ? "Discord に送った(メンションなし)" : "Discord に送れなかった", at: now)
+        if safetyGate.isEnabled(.discordExposure) {
+            let sent = await actions.post(text, nil, EvidenceKind.none.filename, false)
+            record(
+                decision,
+                outcome: sent ? "Discord に送った(メンションなし)" : "Discord に送れなかった",
+                at: now
+            )
+        } else {
+            // メンションなしの報告も、トグルが OFF なら投稿しない。
+            record(decision, outcome: "Discord に晒す が OFF なので投稿しない", at: now)
+        }
         return decision
     }
 
@@ -814,7 +838,7 @@ public final class DetectionEngine: ObservableObject {
         case .expose:
             let decision = DetectionDecision(
                 state: .exposing,
-                evidence: EvidenceKind.forEvidence(iphone: signals.iphone),
+                evidence: EvidenceKind.forEvidence(iphone: signals.iphone, gate: safetyGate),
                 reason: "デバッグメニューから晒した"
             )
             state = .exposing

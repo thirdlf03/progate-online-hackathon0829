@@ -13,16 +13,21 @@ final class StubPetMenuActions: ObservableObject, PetMenuActions {
     var voiceMode: VoiceMode = .bundled
     var focusStreakIntervalSeconds: TimeInterval = 900
     var isFastThresholds = false
+    /// セーフティーモードの 1 行表示。テストでは固定値で十分。
+    var safetyStatusLine = "モード: セーフティー"
     /// 「集中継続のセリフを再現」が押された回数。
     private(set) var focusStreakReplays = 0
     /// 「実際に進める」で投げられた操作。
     private(set) var detectionSteps: [DetectionDebugStep] = []
+    /// 設定画面を開いた回数。
+    private(set) var safetySettingsOpens = 0
 
     func startWatching() {}
     func stopWatching() {}
     func stampAttendance() {}
     func startBreak() {}
     func endBreak() {}
+    func openSafetySettings() { safetySettingsOpens += 1 }
     func openDiscordSettings() {}
     func openPermissions() {}
     func toggleStatusPanel() {}

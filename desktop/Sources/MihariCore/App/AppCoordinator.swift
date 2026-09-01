@@ -496,6 +496,20 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         detection.runDebugStep(step)
     }
 
+    /// いまのセーフティーモードの 1 行表示。メニューの最上段に出す。
+    public var safetyStatusLine: String {
+        var line = "モード: \(safety.mode.label)"
+        if let pending = safety.settings.pendingChange {
+            line += " ・変更予約 \(StatusPanelSnapshot.pendingChangeText(until: pending.effectiveAt, now: Date()))"
+        }
+        return line
+    }
+
+    public func openSafetySettings() {
+        // #54 で設定画面を開く。ここでは空のままにして、メニューからはモードの
+        // 表示だけを出す。#54 が中身を入れる。
+    }
+
     /// 説教オーバーレイを組み立てる。セリフの取得と読み上げの停止はこのアプリのものを渡す。
     private func makeOverlay() -> OverlayModel {
         let voice = self.voice
@@ -519,9 +533,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         )
     }
 
-    /// 状態パネルの中身。エンジンとデーモンの `@Published` をそのまま映す。
+    /// 状態パネルの中身。エンジンとデーモンとセーフティー設定の `@Published` をそのまま映す。
     private var statusPanelView: StatusPanelView {
-        StatusPanelView(engine: detection, daemon: daemon)
+        StatusPanelView(engine: detection, daemon: daemon, safety: safety)
     }
 
     // MARK: - 配線
@@ -534,6 +548,8 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     private func wireDetection() {
         // セーフティートグル(.macCamera)の OFF は撮影の先頭で弾かれる。
         let capture = CaptureService(camera: CameraCaptureService(gate: safety.gate))
+        // セーフティートグル。証拠の取り先と Discord 投稿の可否をエンジンがここで見る。
+        detection.safetyGate = safety.gate
         detection.actions = DetectionEngine.Actions(
             captureMacPhoto: { await Self.photoData(from: capture) },
             captureIPhoneScreenshot: { [daemon] in
@@ -632,6 +648,14 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     private func handle(_ event: DaemonEvent) {
         switch event.name {
         case "iphone.state":
+            // iphonePresence が OFF のあいだは、届いたイベントを拾わない。
+            // bridge 側(#50)も流さないが、遅れて届いたり既に持っていたりする
+            // 値を引きずらないよう、Swift 側でも二重に塞ぐ。
+            guard safety.isEnabled(.iphonePresence) else {
+                detection.iphoneState = .unreachable
+                detection.iphoneForegroundApp = nil
+                return
+            }
             applyIPhoneState(event)
         case "watch.start":
             // Discord の /watch から始めた場合。すでに見張っていれば何も起きない。
@@ -658,6 +682,19 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
                     } else {
                         self.photobombWatcher.stop()
                     }
+                }
+            }
+            .store(in: &cancellables)
+
+        // iphonePresence が OFF になった瞬間から、検知エンジンの iPhone 情報を
+        // 固定する。ON に戻ったら SSE のイベントがまた流れ始めるので、ここで
+        // 立て直す必要はない。
+        safety.$settings
+            .sink { [weak self] settings in
+                MainActor.assumeIsolated {
+                    guard let self, !settings.isEnabled(.iphonePresence) else { return }
+                    self.detection.iphoneState = .unreachable
+                    self.detection.iphoneForegroundApp = nil
                 }
             }
             .store(in: &cancellables)

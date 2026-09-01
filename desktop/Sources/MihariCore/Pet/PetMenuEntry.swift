@@ -24,6 +24,12 @@ public enum PetMenuEntries {
     ) -> [PetMenuEntry] {
         let pet = presenter.controller
         var entries: [PetMenuEntry] = [
+            // 最上段はセーフティーモードの表示。押すと設定画面(中身は #54)へ。
+            .item(
+                title: actions.safetyStatusLine,
+                action: { actions.openSafetySettings() }
+            ),
+            .separator,
             .item(
                 title: actions.isWatching ? "監視を止める" : "監視を再開する",
                 action: {

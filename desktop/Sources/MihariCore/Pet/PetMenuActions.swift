@@ -23,6 +23,9 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     /// 検知の閾値が短縮(`DetectionThresholds.fast`)か。デバッグメニューのチェックに使う。
     var isFastThresholds: Bool { get }
 
+    /// いまのセーフティーモードの 1 行表示。予約があれば残り時間も載せる。
+    var safetyStatusLine: String { get }
+
     /// 監視を始める。
     func startWatching()
     /// 監視を止める。
@@ -33,6 +36,8 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     func startBreak()
     /// 休憩を終える。
     func endBreak()
+    /// セーフティー設定の画面を開く。
+    func openSafetySettings()
     /// Discord 設定の画面を開く。
     func openDiscordSettings()
     /// 権限の確認画面を開く。

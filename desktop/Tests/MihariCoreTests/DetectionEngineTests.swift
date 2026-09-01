@@ -387,13 +387,18 @@ struct DetectionExposureTests {
         #expect(loud.interrupted.first?.escalation == .expose)
     }
 
-    @Test("撮れなくても送信を試みず、メンヘラモードには進む")
-    func captureFailureStillEntersClingy() async {
+    @Test("撮れなくても文面だけは投稿し、メンヘラモードには進む")
+    func captureFailureStillPostsTextAndEntersClingy() async throws {
         let spy = ActionSpy()
         let engine = await exposeNow(spy: spy, captureSucceeds: false)
 
         #expect(spy.macPhotos == 1)
-        #expect(spy.posts.isEmpty)
+        // 撮影の失敗は投稿の失敗ではない。証拠なしの文面だけを送る。
+        let posted = try #require(spy.posts.first)
+        #expect(spy.posts.count == 1)
+        #expect(posted.image == nil)
+        #expect(posted.filename == EvidenceKind.none.filename)
+        #expect(posted.mention)
         #expect(engine.lastEvidenceAt == nil)
         #expect(engine.log.contains { $0.outcome.contains("証拠を取れなかった") })
         if case .clingy = engine.state {} else { Issue.record("メンヘラモードに入っていない") }
@@ -591,5 +596,113 @@ struct DetectionDebugCheckTests {
 
         #expect(engine.state == .normal)
         #expect(pet.dismissals == 1)
+    }
+}
+
+/// セーフティートグルが OFF の機能は、晒し・メンヘラでも一切呼ばれないことを確かめる。
+@Suite("検知とセーフティートグル")
+@MainActor
+struct DetectionSafetyGateTests {
+
+    /// 晒しのデバッグ操作から、メンヘラモードに入るまで進める。
+    private func exposeUntilClingy(_ engine: DetectionEngine) async {
+        engine.runDebugStep(.expose)
+        await settle(until: {
+            if case .clingy = engine.state { return true }
+            return false
+        })
+    }
+
+    @Test("全 OFF なら晒しまで進んでも、撮影も投稿も画面の読み取りも呼ばれない")
+    func denyAllSkipsEveryAction() async {
+        let spy = ActionSpy()
+        let pet = PetSpy()
+        let engine = makeDetectionEngine(idle: IdleClock(600), spy: spy, pet: pet, sleep: { _ in })
+        engine.safetyGate = .denyAll
+        let base = Date()
+
+        // 疑い 1 → 2 → 3 と進んで、その先の晒しまで回す。
+        await engine.evaluate(now: base)
+        await settle(until: { !engine.isCheckRunning })
+        await engine.evaluate(now: base.addingTimeInterval(6))
+        await settle(until: { !engine.isCheckRunning })
+        await engine.evaluate(now: base.addingTimeInterval(12))
+        let decision = await engine.evaluate(now: base.addingTimeInterval(18))
+
+        #expect(decision.state == .exposing)
+        #expect(decision.evidence == .none)
+        #expect(spy.macPhotos == 0)
+        #expect(spy.iphoneShots == 0)
+        #expect(spy.screenReads.isEmpty)
+        #expect(spy.posts.isEmpty)
+        #expect(spy.interrupted.isEmpty)
+        #expect(engine.state == .clingy(since: base.addingTimeInterval(18), count: 0))
+        // 晒しの段階は従来どおり記録される。投稿だけがなかった。
+        #expect(engine.log.contains { $0.outcome.contains("Discord に晒す が OFF") })
+    }
+
+    @Test("Discord に晒すだけなら、証拠なしの文面だけをメンション付きで 1 回投稿する")
+    func exposureOnlyPostsTextWithoutAnImage() async throws {
+        let spy = ActionSpy()
+        let engine = makeDetectionEngine(idle: IdleClock(600), spy: spy)
+        engine.safetyGate = SafetyGate(isEnabled: { $0 == .discordExposure })
+
+        await exposeUntilClingy(engine)
+
+        #expect(spy.macPhotos == 0)
+        #expect(spy.iphoneShots == 0)
+        let posted = try #require(spy.posts.first)
+        #expect(spy.posts.count == 1)
+        #expect(posted.image == nil)
+        #expect(posted.filename == EvidenceKind.none.filename)
+        #expect(posted.mention)
+        #expect(posted.text.contains(DiscordMessageComposer.subtextPrefix))
+    }
+
+    @Test("カメラと晒しが ON なら、従来どおり写真を添えて投稿する")
+    func cameraAndExposurePostWithThePhoto() async throws {
+        let spy = ActionSpy()
+        let engine = makeDetectionEngine(idle: IdleClock(600), spy: spy)
+        engine.safetyGate = SafetyGate(isEnabled: { $0 == .macCamera || $0 == .discordExposure })
+
+        await exposeUntilClingy(engine)
+
+        #expect(spy.macPhotos == 1)
+        let posted = try #require(spy.posts.first)
+        #expect(posted.image == Data("camera".utf8))
+        #expect(posted.filename == EvidenceKind.macCamera.filename)
+        #expect(posted.mention)
+    }
+
+    @Test("iPhone を見張るだけなら、操作中でも証拠は撮らない")
+    func iphonePresenceOnlyCapturesNothing() async {
+        let spy = ActionSpy()
+        let engine = makeDetectionEngine(idle: IdleClock(600), spy: spy, iphone: .active)
+        engine.safetyGate = SafetyGate(isEnabled: { $0 == .iphonePresence })
+
+        await exposeUntilClingy(engine)
+
+        #expect(spy.macPhotos == 0)
+        #expect(spy.iphoneShots == 0)
+        #expect(spy.posts.isEmpty)
+        #expect(engine.log.first?.evidence == EvidenceKind.none)
+    }
+
+    @Test("メンヘラの連投も、晒しが OFF なら投稿されない")
+    func clingyDoesNotPostWhenExposureIsOff() async {
+        let spy = ActionSpy()
+        let engine = makeDetectionEngine(idle: IdleClock(0), spy: spy, sleep: { _ in })
+        engine.safetyGate = SafetyGate(isEnabled: { $0 == .macCamera })
+
+        engine.runDebugStep(.startClingy)
+        await settle(until: {
+            if case .clingy(_, let count) = engine.state {
+                return count == DetectionEngine.debugClingyBurstCount
+            }
+            return false
+        })
+
+        #expect(spy.posts.isEmpty)
+        #expect(engine.log.first?.outcome.contains("Discord に晒す が OFF") == true)
     }
 }

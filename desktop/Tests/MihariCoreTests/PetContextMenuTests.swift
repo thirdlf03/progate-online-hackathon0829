@@ -78,4 +78,19 @@ struct PetContextMenuTests {
         #expect(menu.items[1].submenu?.autoenablesItems == false)
         #expect(menu.items[1].submenu?.items.allSatisfy { $0.isEnabled } == true)
     }
+
+    @Test("右クリックメニューの先頭はモード行になる")
+    func firstEntryIsTheModeLine() throws {
+        _ = NSApplication.shared
+        let actions = StubPetMenuActions()
+        let suiteName = "mihari.test.contextMenu.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let presenter = LivePetPresenter(controller: PetController(defaults: defaults))
+
+        let menu = PetContextMenu.makeMenu(PetMenuEntries.make(actions: actions, presenter: presenter))
+
+        #expect(menu.items.first?.title == actions.safetyStatusLine)
+        #expect(menu.items[1].isSeparatorItem)
+    }
 }

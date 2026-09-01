@@ -29,6 +29,23 @@ struct PetMenuEntriesTests {
         return nil
     }
 
+    @Test("先頭はモード行で、その直後に区切り線が来る")
+    func firstEntriesAreTheModeLine() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+
+        let entries = PetMenuEntries.make(actions: actions, presenter: presenter)
+        guard case .item(let title, _, _) = entries.first else {
+            Issue.record("先頭が項目でない")
+            return
+        }
+        #expect(title == actions.safetyStatusLine)
+        guard case .separator = entries[1] else {
+            Issue.record("モード行の直後に区切り線が無い")
+            return
+        }
+    }
+
     @Test("「スクショに写り込む」のチェックは写り込みの入り / 切りを映し、押すと切り替わる")
     func photobombEntryReflectsAndTogglesTheSetting() throws {
         let presenter = makePresenter()
@@ -65,8 +82,8 @@ struct PetMenuEntriesTests {
         let separatorCount = entries.reduce(into: 0) { count, entry in
             if case .separator = entry { count += 1 }
         }
-        // (監視 / 在席 / 休憩)と(Discord / 権限)の区切り 2 本だけになる。
-        #expect(separatorCount == 2)
+        // (モード)と(監視 / 在席 / 休憩)と(Discord / 権限)の区切り 3 本だけになる。
+        #expect(separatorCount == 3)
 
         // 見える設定なら(既定どおり)デバッグサブメニューが最後に付く。
         let visible = StubPetMenuActions()
