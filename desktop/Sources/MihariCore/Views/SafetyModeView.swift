@@ -24,6 +24,12 @@ public struct SafetyModeView: View {
     private let isWatching: Bool
     private let context: Context
     private let onFeatureEnabled: (SafetyFeature) -> Void
+    /// 「Mihari をアンインストール…」を押したときの処理。設定画面だけ渡す
+    /// (オンボーディングでは nil で、ボタン自体を出さない)。#55
+    private let onUninstall: (() -> Void)?
+    /// アンインストールできるか。quitLock が ON のロック中は false で、
+    /// ボタンを押せなくして理由を隣に出す。オンボーディングでは false。#55
+    private let canUninstall: Bool
 
     /// カードの状態行に 3 秒だけ出す文言。機能ごとに持つ。
     @State private var cardMessages: [SafetyFeature: String] = [:]
@@ -34,16 +40,23 @@ public struct SafetyModeView: View {
     ///   - isWatching: いま監視中か。設定画面では `AppCoordinator` の `isWatching` を映す。
     ///   - onFeatureEnabled: ON に成功した(`.apply` で新たに ON になった)機能ごとに呼ばれる。
     ///     呼び側が権限要求・tunneld 登録に使う。
+    ///   - onUninstall: 「Mihari をアンインストール…」の処理。設定画面だけ渡し、
+    ///     オンボーディングでは nil。
+    ///   - canUninstall: アンインストールできるか。オンボーディングでは false。
     public init(
         safety: SafetySettingsStore,
         isWatching: Bool,
         context: Context,
-        onFeatureEnabled: @escaping (SafetyFeature) -> Void
+        onFeatureEnabled: @escaping (SafetyFeature) -> Void,
+        onUninstall: (() -> Void)?,
+        canUninstall: Bool
     ) {
         self.safety = safety
         self.isWatching = isWatching
         self.context = context
         self.onFeatureEnabled = onFeatureEnabled
+        self.onUninstall = onUninstall
+        self.canUninstall = canUninstall
     }
 
     public var body: some View {
@@ -368,9 +381,28 @@ public struct SafetyModeView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                uninstallSection
                 Button("閉じる", action: onClose)
                     .controlSize(.large)
             }
+        }
+    }
+
+    /// 設定画面の「Mihari をアンインストール…」。フッターの「閉じる」の左に出す。#55
+    ///
+    /// quitLock が ON のロック中は押せない。押せない理由はキャプションで隣に示し、
+    /// ツールチップにも同じ文言を出す。オンボーディングには渡らない(`onUninstall` が nil)。
+    @ViewBuilder
+    private var uninstallSection: some View {
+        if let onUninstall {
+            if !canUninstall {
+                Text("監視中(ロック中)はアンインストールできません")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button("Mihari をアンインストール…", role: .destructive, action: onUninstall)
+                .disabled(!canUninstall)
+                .help(canUninstall ? "" : "監視中(ロック中)はアンインストールできません")
         }
     }
 
