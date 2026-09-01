@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import SwiftUI
+import os
 
 /// アプリ全体の取りまとめ役。
 ///
@@ -13,14 +14,16 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     /// 検証用の 10 タブ画面を出すかどうかを決める環境変数。
     static let debugUIEnvironmentKey = "MIHARI_DEBUG_UI"
-    /// スクショに写り込むかを覚えておくキー。未設定なら写り込む。
-    static let photobombEnabledKey = "photobombEnabled"
+
+    private static let logger = Logger(subsystem: "com.thirdlf03.mihari", category: "app-coordinator")
 
     public let permissions: PermissionsModel
     public let daemon = DaemonController()
     public let voice: VoiceController
     /// 同封音声か live か。ペット・検知・説教のすべてがここを見る。
     public let voiceModeStore: VoiceModeStore
+    /// セーフティートグルの設定とポリシー。#49。
+    public let safety: SafetySettingsStore
     public let discord = DiscordController()
     public let attendance: AttendanceModel
     public let detection: DetectionEngine
@@ -35,6 +38,7 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     // 以下は検証用の 10 タブ画面でしか使わないので、開かれるまで作らない。
     public lazy var capture = CaptureViewModel(
+        service: CaptureService(camera: CameraCaptureService(gate: safety.gate)),
         iphoneScreenshot: { [daemon] in
             guard let client = await daemon.connectedClient else { throw DaemonError.notRunning }
             return try await client.iphoneScreenshot()
@@ -54,8 +58,10 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     @Published public private(set) var isOnBreak = false
     /// 状態パネルを出しているか。メニューの表示に使う。
     @Published public private(set) var isStatusPanelVisible = false
-    /// スクショに写り込むか。メニューの表示に使う。
-    @Published public private(set) var isPhotobombEnabled: Bool
+    /// スクショに写り込むか。メニューの表示に使う。セーフティートグル(.photobomb)を映す。
+    public var isPhotobombEnabled: Bool {
+        safety.isEnabled(.photobomb)
+    }
 
     /// 在席スタンプのカットインを出す層。
     private let cutIn: AttendanceCutInPresenting = AttendanceCutInPresenter()
@@ -113,11 +119,13 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     ///   - loginItemRegistrar: ログイン項目への登録処理。テストでは何もしないスタブに差し替える。
     ///   - watchdogRegistrar: 監視プロセスの登録処理。テストでは何もしないスタブに差し替える。
     ///   - lifecycleMarker: 前回の終了が正常だったかの記録。テストでは固定値を返すスタブに差し替える。
+    ///   - safety: セーフティートグルの設定。テストでは `UserDefaults(suiteName:)` の store を渡す。
     public init(
         sleepPreventer: SleepPreventing = IOPMSleepPreventer(),
         loginItemRegistrar: LoginItemRegistering = SMAppServiceLoginItemRegistrar(),
         watchdogRegistrar: WatchdogRegistering = LaunchAgentWatchdogRegistrar(),
-        lifecycleMarker: AppLifecycleMarking = UserDefaultsLifecycleMarker()
+        lifecycleMarker: AppLifecycleMarking = UserDefaultsLifecycleMarker(),
+        safety: SafetySettingsStore = SafetySettingsStore()
     ) {
         let player = SpeechPlayer()
         let attendance = AttendanceModel()
@@ -126,13 +134,11 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         self.permissions = PermissionsModel()
         self.voice = VoiceController(player: player)
         self.voiceModeStore = VoiceModeStore()
+        self.safety = safety
         // 在席スタンプ直後の猶予を効かせるため、検知エンジンに在席の記録を渡す。
         self.detection = DetectionEngine(attendance: attendance)
         self.pet = LivePetPresenter(controller: PetController(speechPlayer: player))
         self.isStatusPanelVisible = statusPanel.isVisible
-        // 一度も切っていなければ写り込む。余興なので、既定で入っている方が気付いてもらえる。
-        self.isPhotobombEnabled =
-            UserDefaults.standard.object(forKey: Self.photobombEnabledKey) as? Bool ?? true
         self.sleepPreventer = sleepPreventer
         self.loginItemRegistrar = loginItemRegistrar
         self.watchdogRegistrar = watchdogRegistrar
@@ -214,6 +220,7 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         statusPanel.restore { statusPanelView }
         observeDetection()
         observeDaemonEvents()
+        observeSafety()
 
         // Claude Code の Stop フック(notifyutil -p)からの「応答を終えた」合図。
         externalTrigger.listen(name: ExternalTriggerListener.claudeDoneName) { [weak self] in
@@ -230,6 +237,8 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         Task { [weak self] in
             guard let self else { return }
             await daemon.start()
+            // セーフティートグルをデーモンへ伝える。サーバ側の受信は #50 で実装される。
+            pushSafetyToDaemon()
             wireDetection()
             // 常駐して見張るアプリなので、始めたら見張り続ける。
             detection.start()
@@ -291,6 +300,11 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     /// 検証用の 10 タブ画面が要求されているか。
     private static var isDebugUIRequested: Bool {
         ProcessInfo.processInfo.environment[debugUIEnvironmentKey] == "1"
+    }
+
+    /// デバッグメニューを出すか(メニュー項目の露出制御)。
+    public var isDebugMenuVisible: Bool {
+        Self.isDebugUIRequested
     }
 
     // MARK: - ウィンドウ
@@ -426,18 +440,17 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         isStatusPanelVisible = statusPanel.isVisible
     }
 
-    /// スクショへの写り込みを入れる / 切る。切り替えた結果は次の起動にも引き継ぐ。
+    /// スクショへの写り込みを入れる / 切る。
     ///
-    /// 見張り始める前に入れられても、見張りを始めるときに `begin()` が起こす。
+    /// フラグはセーフティートグル(.photobomb)として扱う。ON の監視中はポリシーが
+    /// 拒否するので、切り替え結果はメニューのチェックが次に組み立てられるときに映る。
     public func setPhotobombEnabled(_ enabled: Bool) {
-        isPhotobombEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.photobombEnabledKey)
-        if enabled {
-            guard hasBegun else { return }
-            startPhotobombWatching()
-        } else {
-            photobombWatcher.stop()
-        }
+        safety.request(
+            enabled ? .enable(.photobomb) : .disable(.photobomb),
+            isWatching: isWatching
+        )
+        // メニューのチェックを描き直させる。
+        objectWillChange.send()
     }
 
     /// 保存されたスクショを見張り始める。すでに見張っていれば何も起きない。
@@ -500,7 +513,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
                 }
                 return await voice.speak(request, using: daemon.connectedClient)
             },
-            stopSpeaking: { [weak voice] in voice?.stopSpeaking() }
+            stopSpeaking: { [weak voice] in voice?.stopSpeaking() },
+            // トグルが OFF なら音楽停止も含めて何もしない(検知側には知らせない)。
+            gate: safety.gate
         )
     }
 
@@ -517,7 +532,8 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     /// VOICEVOX が起動していない、Discord のトークンが無い、はどれも起こりうる。
     /// 1 つ転んだせいで見張りが死ぬのが一番まずい。
     private func wireDetection() {
-        let capture = CaptureService()
+        // セーフティートグル(.macCamera)の OFF は撮影の先頭で弾かれる。
+        let capture = CaptureService(camera: CameraCaptureService(gate: safety.gate))
         detection.actions = DetectionEngine.Actions(
             captureMacPhoto: { await Self.photoData(from: capture) },
             captureIPhoneScreenshot: { [daemon] in
@@ -624,6 +640,68 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
             detection.stop()
         default:
             break
+        }
+    }
+
+    /// セーフティートグルの変化を、実行部とデーモンへ配る。
+    private func observeSafety() {
+        // photobomb が ON になったら写り込みの見張りを始め、OFF になったら止める。
+        // `begin()` は自分で一度 `startPhotobombWatching()` を呼ぶので、ここで拾うのは
+        // 始めたあとの変化だけ。
+        safety.$settings
+            .sink { [weak self] settings in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if settings.isEnabled(.photobomb) {
+                        guard self.hasBegun else { return }
+                        self.startPhotobombWatching()
+                    } else {
+                        self.photobombWatcher.stop()
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
+        // トグルの変化をデーモンへ伝える。初回の配信は現在値で、begin() が明示的に
+        // 送るぶんと重なるので落とす。
+        safety.$settings
+            .dropFirst()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.pushSafetyToDaemon()
+                }
+            }
+            .store(in: &cancellables)
+
+        // デーモン(SSE)の接続が回復したときにも再送する。接続はデーモンの再起動の
+        // たびに切れて張り直されるので、その間に変わった設定を取り戻す。
+        daemon.$isStreamConnected
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.pushSafetyToDaemon()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// いまのセーフティートグルをデーモンへ伝える。
+    ///
+    /// サーバ側の受信は #50 で実装される。まだ実装されていなくても失敗するだけで、
+    /// 送る側は握りつぶして続ける(次に設定が変わるか接続が戻ったときに再送される)。
+    /// 失敗の理由だけはログに残す。
+    private func pushSafetyToDaemon() {
+        let client = daemon.connectedClient
+        let payload = safety.daemonPayload
+        Task {
+            do {
+                try await client?.updateSafety(payload)
+            } catch {
+                Self.logger.error(
+                    "セーフティー設定をデーモンに送れなかった: \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
     }
 

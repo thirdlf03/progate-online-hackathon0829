@@ -56,6 +56,8 @@ public final class OverlayModel: ObservableObject {
     private let speak: SermonSpeaking
     private let stopSpeaking: () -> Void
     private let sleep: Sleeping
+    /// 機能トグルの判定口。`.sermonTakeover` が OFF なら何もせずに戻る。
+    private let gate: SafetyGate
 
     private var sermonTask: Task<Void, Never>?
     private var hardDeadlineTask: Task<Void, Never>?
@@ -73,6 +75,7 @@ public final class OverlayModel: ObservableObject {
     ///   - stopSpeaking: 読み上げを止める処理。既定は何もしない。`OverlayView` からは
     ///     `VoiceController.stopSpeaking` を渡す。
     ///   - sleep: タイマーの待機処理。テストは実際の秒数を待たずに済むものへ差し替える。
+    ///   - gate: 機能トグルの判定口。既定は .allowAll(旧挙動)。
     public init(
         presenter: OverlayWindowPresenting,
         musicController: MusicControlling = AppleScriptMusicController(),
@@ -80,7 +83,8 @@ public final class OverlayModel: ObservableObject {
         resumeMusicAfterDismiss: Bool = false,
         speak: @escaping SermonSpeaking = { _ in nil },
         stopSpeaking: @escaping () -> Void = {},
-        sleep: @escaping Sleeping = { try? await Task.sleep(for: $0) }
+        sleep: @escaping Sleeping = { try? await Task.sleep(for: $0) },
+        gate: SafetyGate = .allowAll
     ) {
         self.presenter = presenter
         self.musicController = musicController
@@ -89,10 +93,17 @@ public final class OverlayModel: ObservableObject {
         self.speak = speak
         self.stopSpeaking = stopSpeaking
         self.sleep = sleep
+        self.gate = gate
     }
 
     /// 説教オーバーレイを開始する。すでに表示中なら何もしない(二重表示防止)。
     public func show(request: SpeechRequest = OverlayModel.defaultSermonRequest) {
+        // トグルが OFF なら音楽停止も含めて何もしない。ON/OFF は呼び出し側の
+        // 検知エンジンには知らせず、ここで素通りさせる。
+        guard gate.isEnabled(.sermonTakeover) else {
+            Self.logger.info("sermonTakeover が OFF のため説教オーバーレイを出さない")
+            return
+        }
         guard !isPresented else {
             appendLog("すでに表示中なので無視した(二重起動防止)")
             return
