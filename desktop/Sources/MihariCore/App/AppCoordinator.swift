@@ -44,7 +44,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     // 以下は検証用の 10 タブ画面でしか使わないので、開かれるまで作らない。
     public lazy var capture = CaptureViewModel(
         service: CaptureService(camera: CameraCaptureService(gate: safety.gate)),
-        iphoneScreenshot: { [daemon] in
+        iphoneScreenshot: { [daemon, gate = safety.gate] in
+            // デバッグ経路もトグルを越えられない。bridge 側の 403 と二重防御にする(#58)。
+            try gate.check(.iphoneScreenshot)
             guard let client = await daemon.connectedClient else { throw DaemonError.notRunning }
             return try await client.iphoneScreenshot()
         },
@@ -69,6 +71,11 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     }
     /// アンインストールの進行中か。終了確認(`confirmQuit`)を素通しするためのフラグ。#55
     public private(set) var isUninstalling = false
+    /// 消す作業そのものの Task。終了要求はこれの完了を待ってから通す。#55
+    ///
+    /// 待たずに通すと、SIGTERM 経路が `exit(0)` で即死して、消しかけの登録とファイルが
+    /// 残ったままになる。
+    private var uninstallTask: Task<Void, Never>?
 
     /// 在席スタンプのカットインを出す層。
     private let cutIn: AttendanceCutInPresenting = AttendanceCutInPresenter()
@@ -129,6 +136,12 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     private var quitLockPolicyState: Bool?
     /// 前回の執行猶予脱出からの復帰で「戻ってきた」か。デーモン接続後の投稿までためておく。
     private var pendingEscapeReturn: Bool?
+    /// 「逃げた」の投稿を待つ Task。終了要求はこれの完了を待ってから通す。#52
+    ///
+    /// 投稿を投げっぱなしにすると、直後の Cmd+Q / SIGTERM で接続ごと消えて投稿が飛ぶ。
+    private var escapePostTask: Task<Void, Never>?
+    /// 「逃げた」の投稿を待つ上限。ここまで待って返らなければ投稿を諦めて終了する。
+    private static let escapePostTimeout: Duration = .seconds(10)
     /// quitLock の解除時刻などの保存先。
     private let defaults: UserDefaults
 
@@ -304,7 +317,11 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     public func confirmQuit(interactive: Bool) async -> Bool {
         // アンインストールの流れは確認を挟み終えているので、素通しする。
         // ここで止まると、消したはずのファイルと登録を残したままアプリが残る。
-        if isUninstalling { return true }
+        // ただし消し終える前に終わってしまうと中途半端に残るので、作業の完了は待つ。
+        if isUninstalling {
+            await uninstallTask?.value
+            return true
+        }
         guard hasBegun else { return true }
 
         if safety.isEnabled(.quitLock) {
@@ -315,6 +332,8 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
                 }
                 return false
             }
+            // 「逃げた」の投稿中に終了すると投稿が飛ぶ。上限つきで待ってから通す(#52)。
+            await escapePostTask?.value
             // 脱出の完了による終了は、監視プロセスとログイン項目を残したまま終わる
             // (宣言時刻に自動で戻って監視を再開させるため、ここでは解除しない)。
             if !escape.isReadyToTerminate {
@@ -382,7 +401,9 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         isUninstalling = true
-        Task { [weak self] in
+        // 消す作業と、そのあとの終了は分けておく。`confirmQuit` が待つのは前者だけで、
+        // 自分自身の完了を待って固まらないようにする。
+        let work = Task { [weak self] in
             guard let self else { return }
             // 消している最中に検知・写り込み・デーモンが動き続けないように止める。
             detection.stop()
@@ -402,6 +423,10 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
             if !report.failed.isEmpty {
                 showUninstallFailure(report)
             }
+        }
+        uninstallTask = work
+        Task {
+            await work.value
             NSApp.terminate(nil)
         }
     }
@@ -428,7 +453,8 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     ///
     /// `begin()` と、quitLock が OFF→ON に変わったとき(監視外でしか起きない)に呼ぶ。
     /// ON のときはスリープ防止・ログイン項目・watchdog(+見直しループ)を入れ、
-    /// 保存されていた解除時刻(`quitLock.unlockAt`)が未来ならそれを引き継ぐ。
+    /// 保存されていた解除時刻(`quitLock.unlockAt`)が未来ならそれを引き継ぐ。引き継ぐ
+    /// ものが無ければ既定時間で仮ロックして、この瞬間からロックを効かせる。
     /// OFF のときは以前 ON だったときの登録を掃除する。ON→OFF はロック中には起きない
     /// (SafetyPolicy が弾く)ので、掃除だけで足りる。
     private func applyQuitLockPolicy() {
@@ -438,9 +464,23 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
             watchdogRegistrar.ensureRegistered()
             startWatchdogReassertion()
             resumePersistedQuitLockDeadline()
+            beginProvisionalQuitLockIfNeeded()
         } else {
             releaseQuitLock()
         }
+    }
+
+    /// 引き継ぐ解除時刻が無ければ、既定の 4 時間で仮ロックして保存する。
+    ///
+    /// 解除時刻はデーモンに繋がってからでないと確定しない(`establishFreshQuitLockDeadline`)。
+    /// その数秒を `unlockAt == nil` のまま放っておくと `QuitTimeLock.isUnlocked()` が true を
+    /// 返し、Cmd+Q / SIGTERM が素通りしてしまう。#5 は「起動した瞬間から効く」なので、
+    /// 先に塞いでおく。仮ロックだと分かるようにしておき、確定したら引き直す。
+    /// 再起動を跨いだときは保存値の引き継ぎ側が拾うので、そのまま本ロックとして扱われる。
+    private func beginProvisionalQuitLockIfNeeded() {
+        guard quitTimeLock.unlockAt == nil else { return }
+        quitTimeLock = QuitTimeLock.provisional(hours: Self.defaultLockHours, from: Date())
+        defaults.set(quitTimeLock.unlockAt, forKey: Self.quitLockDeadlineKey)
     }
 
     /// 終了ブロックを OFF にしたときの後片付け。登録を解き、解除時刻と保存を取り消す。
@@ -483,23 +523,25 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     /// 終了ロックの解除時刻を確定する。デーモンに繋がったあとに呼ぶ。
     ///
-    /// 保存値の引き継ぎ(`resumePersistedQuitLockDeadline`)で既にロックされていれば
-    /// 何もしない。そうでなければ Discord の `/watch lock` の値(取れなければ既定 4 時間)
-    /// で新規ロックして保存する ―― 取れないからロックしない、は「ロックできない状況を
-    /// 作れば終了できる」という抜け道になってしまう。
+    /// 保存値の引き継ぎ(`resumePersistedQuitLockDeadline`)で既に本ロック中なら何もしない。
+    /// 仮ロック中(`beginProvisionalQuitLockIfNeeded`)なら Discord の `/watch lock` の値
+    /// (取れなければ既定 4 時間)で引き直して保存する ―― 取れないからロックしない、は
+    /// 「ロックできない状況を作れば終了できる」という抜け道になってしまう。
     private func establishFreshQuitLockDeadline() async {
-        guard quitTimeLock.unlockAt == nil else { return }
+        guard quitTimeLock.acceptsFreshDeadline else { return }
         var hours: Double?
         if let client = daemon.connectedClient {
             hours = try? await client.lockHours()
         }
-        // lockHours を待っているあいだに別経路で確定されたら、それを尊重する。
-        guard quitTimeLock.unlockAt == nil else { return }
-        quitTimeLock = QuitTimeLock.resume(
+        // lockHours を待っているあいだに別経路で確定されたら、`establishing` が据え置く。
+        let established = QuitTimeLock.establishing(
+            from: quitTimeLock,
             persisted: defaults.object(forKey: Self.quitLockDeadlineKey) as? Date,
             now: Date(),
-            fallbackHours: hours ?? Self.defaultLockHours
+            hours: hours ?? Self.defaultLockHours
         )
+        guard established != quitTimeLock else { return }
+        quitTimeLock = established
         defaults.set(quitTimeLock.unlockAt, forKey: Self.quitLockDeadlineKey)
     }
 
@@ -595,18 +637,35 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         safety.markEscapeUsed(at: record.escapedAt)
         EscapeController.savePendingReport(record, defaults: defaults)
         // 投稿はデーモンを落とす(shutdown)前に済ませる。接続を切ってからでは届かない。
+        // 待っているあいだに Cmd+Q / SIGTERM が来ても投稿が飛ばないよう、`confirmQuit`
+        // からも同じ Task を待つ。
+        let posting = postEscaped(record: record)
+        escapePostTask = posting
         Task { [weak self] in
-            guard let self else { return }
-            if self.safety.isEnabled(.discordExposure) {
-                await self.discord.post(
-                    text: DiscordMessageComposer.escaped(returnAt: record.returnAt),
-                    image: nil,
-                    mention: true,
-                    using: self.daemon.connectedClient
-                )
-            }
-            self.shutdown()
+            await posting.value
+            self?.shutdown()
             NSApp.terminate(nil)
+        }
+    }
+
+    /// 「逃げた」を Discord に投稿する Task を作る。晒しが OFF なら何もしない Task を返す。
+    ///
+    /// 投稿が返ってこないせいで終了できなくなるのを避けるため、`escapePostTimeout` で
+    /// 投稿を取り消す。取り消された投稿は `discord.post` の失敗として扱われ(原因は
+    /// `DiscordController` がログに残す)、終了はそのまま進む。
+    private func postEscaped(record: EscapeRecord) -> Task<Void, Never> {
+        guard safety.isEnabled(.discordExposure) else { return Task {} }
+        let text = DiscordMessageComposer.escaped(returnAt: record.returnAt)
+        let post = Task<Void, Never> { [discord, daemon] in
+            await discord.post(text: text, image: nil, mention: true, using: daemon.connectedClient)
+        }
+        return Task {
+            let deadline = Task {
+                try? await Task.sleep(for: Self.escapePostTimeout)
+                post.cancel()
+            }
+            await post.value
+            deadline.cancel()
         }
     }
 

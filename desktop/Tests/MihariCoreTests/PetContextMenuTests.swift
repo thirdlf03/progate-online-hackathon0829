@@ -82,8 +82,8 @@ struct PetContextMenuTests {
         #expect(titles[discordIndex - 1] == "設定…")
     }
 
-    @Test("自動での有効・無効判定に任せず、項目は押せるままにする")
-    func itemsStayEnabled() {
+    @Test("自動での有効・無効判定に任せず、明示しなければ押せるままにする")
+    func itemsStayEnabledUnlessSaidOtherwise() {
         // キーウィンドウにならないパネルから出すので、AppKit に任せると項目が灰色になる。
         let menu = PetContextMenu.makeMenu([
             .item(title: "しゃべる", action: {}),
@@ -94,6 +94,38 @@ struct PetContextMenuTests {
         #expect(menu.items.allSatisfy { $0.isEnabled })
         #expect(menu.items[1].submenu?.autoenablesItems == false)
         #expect(menu.items[1].submenu?.items.allSatisfy { $0.isEnabled } == true)
+    }
+
+    @Test("isEnabled が false の項目は灰色になる")
+    func disabledEntryBecomesAGreyedItem() {
+        let menu = PetContextMenu.makeMenu([
+            .item(title: "どうしても終了する(あと23 時間 0 分で使えます)", isEnabled: false, action: {}),
+            .item(title: "在席スタンプを押す", action: {}),
+        ])
+
+        #expect(menu.items[0].isEnabled == false)
+        #expect(menu.items[1].isEnabled)
+    }
+
+    @Test("脱出が冷却中なら、その項目だけが灰色で並ぶ")
+    func coolingDownEscapeItemIsGreyedOut() throws {
+        let suiteName = "mihari.test.petContextMenu.cooling.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let presenter = LivePetPresenter(controller: PetController(defaults: defaults))
+        let actions = StubPetMenuActions()
+        actions.escapeMenuState = .coolingDown(remaining: 23 * 3600)
+
+        let menu = PetContextMenu.makeMenu(
+            PetMenuEntries.make(actions: actions, presenter: presenter)
+        )
+        let cooling = try #require(
+            menu.items.first { $0.title.hasPrefix("どうしても終了する(") }
+        )
+
+        #expect(cooling.isEnabled == false)
+        // 灰色にするのは冷却中の項目だけ。ほかは押せたままにする。
+        #expect(menu.items.filter { !$0.isSeparatorItem && !$0.isEnabled }.count == 1)
     }
 
     @Test("右クリックメニューの先頭はモード行になる")

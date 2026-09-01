@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// 初回起動のオンボーディング。2 ステップ。
@@ -65,11 +66,20 @@ public struct OnboardingFlowView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: step)
+        // 必須権限はトグルから導出するので、ステップ 1 でトグルを動かすたびに
+        // 権限モデルへ流し込む。`AppCoordinator.observeSafety()` は `begin()` 後にしか
+        // 配線されず、オンボーディング中の変更を拾えない(#51)。
+        .onReceive(safety.$settings) { settings in
+            permissions.apply(settings: settings)
+        }
     }
 
     /// ステップ 2(権限画面)。見せるものが無ければステップ 1 の「次へ」で
     /// そのままオンボーディングを終える。
     private func goToPermissionsStep() {
+        // 「次へ」を押した時点のトグルで判断する。`onReceive` が届く前でも、
+        // 古い設定のまま権限画面を飛ばさないよう、ここでも必ず反映させる。
+        permissions.apply(settings: safety.settings)
         let shouldSkip = SafetyModeViewModel.shouldSkipPermissionsStep(
             relevantKinds: permissions.relevantKinds,
             isIPhoneScreenshotEnabled: safety.isEnabled(.iphoneScreenshot)

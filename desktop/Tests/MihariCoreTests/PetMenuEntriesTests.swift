@@ -20,10 +20,12 @@ struct PetMenuEntriesTests {
     private func findItem(
         _ title: String,
         in entries: [PetMenuEntry]
-    ) -> (isChecked: Bool, action: @MainActor () -> Void)? {
+    ) -> (isChecked: Bool, isEnabled: Bool, action: @MainActor () -> Void)? {
         for entry in entries {
-            if case .item(let itemTitle, let isChecked, let action) = entry, itemTitle == title {
-                return (isChecked, action)
+            if case .item(let itemTitle, let isChecked, let isEnabled, let action) = entry,
+                itemTitle == title
+            {
+                return (isChecked, isEnabled, action)
             }
         }
         return nil
@@ -35,7 +37,7 @@ struct PetMenuEntriesTests {
         let actions = StubPetMenuActions()
 
         let entries = PetMenuEntries.make(actions: actions, presenter: presenter)
-        guard case .item(let title, _, _) = entries.first else {
+        guard case .item(let title, _, _, _) = entries.first else {
             Issue.record("先頭が項目でない")
             return
         }
@@ -95,7 +97,7 @@ struct PetMenuEntriesTests {
         }
     }
 
-    @Test("執行猶予脱出の項目は状態どおりに出る(冷却中は押しても何もしない)")
+    @Test("執行猶予脱出の項目は状態どおりに出る(冷却中は灰色で押せない)")
     func escapeEntriesReflectTheState() throws {
         let presenter = makePresenter()
         let actions = StubPetMenuActions()
@@ -105,6 +107,7 @@ struct PetMenuEntriesTests {
         let open = try #require(
             findItem("どうしても終了する…", in: PetMenuEntries.make(actions: actions, presenter: presenter))
         )
+        #expect(open.isEnabled)
         open.action()
         #expect(actions.escapeDialogOpens == 1)
 
@@ -113,15 +116,17 @@ struct PetMenuEntriesTests {
         let cancel = try #require(
             findItem("終了を取り消す(あと2 分)", in: PetMenuEntries.make(actions: actions, presenter: presenter))
         )
+        #expect(cancel.isEnabled)
         cancel.action()
         #expect(actions.escapeCancels == 1)
         #expect(findItem("どうしても終了する…", in: PetMenuEntries.make(actions: actions, presenter: presenter)) == nil)
 
-        // 冷却中: 押せない(何もしない)項目として、理由をタイトルに載せる。
+        // 冷却中: 灰色にして押せなくし、理由をタイトルに載せる(Epic #58)。
         actions.escapeMenuState = .coolingDown(remaining: 23 * 3600)
         let cooling = try #require(
             findItem("どうしても終了する(あと23 時間 0 分で使えます)", in: PetMenuEntries.make(actions: actions, presenter: presenter))
         )
+        #expect(cooling.isEnabled == false)
         cooling.action()
         #expect(actions.escapeDialogOpens == 1)
         #expect(actions.escapeCancels == 1)

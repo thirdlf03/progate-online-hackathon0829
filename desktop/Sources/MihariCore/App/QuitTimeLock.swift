@@ -12,13 +12,34 @@ public struct QuitTimeLock: Equatable {
     /// (= 監視がまだ始まっていない)状態を表す。
     public private(set) var unlockAt: Date?
 
-    public init(unlockAt: Date? = nil) {
+    /// 仮ロックか。デーモンに繋がって解除時刻を確定するまでのあいだ、既定時間で
+    /// 暫定的に塞いでいる状態を表す。仮ロックのときだけ本ロックで引き直してよい。
+    public private(set) var isProvisional: Bool
+
+    public init(unlockAt: Date? = nil, isProvisional: Bool = false) {
         self.unlockAt = unlockAt
+        self.isProvisional = isProvisional
     }
 
     /// 監視を始めるときに 1 度だけ呼ぶ。`hours` 時間後を解除時刻にする。
     public mutating func lock(for hours: Double, from now: Date = Date()) {
         unlockAt = now.addingTimeInterval(hours * 3600)
+        isProvisional = false
+    }
+
+    /// 起動直後の仮ロック。#52。
+    ///
+    /// 解除時刻はデーモン(Discord の `/watch lock`)に繋がってからでないと確定しないが、
+    /// 繋がるまでの数秒を `unlockAt == nil`(= 解除済み)のまま放っておくと、その間だけ
+    /// Cmd+Q / SIGTERM が素通りする。#5 は「起動した瞬間から効く」ので、まず既定時間で
+    /// 塞いでおき、確定したら `establishing` で引き直す。
+    public static func provisional(hours: Double, from now: Date) -> QuitTimeLock {
+        QuitTimeLock(unlockAt: now.addingTimeInterval(hours * 3600), isProvisional: true)
+    }
+
+    /// 本ロックの解除時刻で引き直してよいか。まだロックしていないか、仮ロック中のときだけ。
+    public var acceptsFreshDeadline: Bool {
+        unlockAt == nil || isProvisional
     }
 
     /// いま終了してよいか。
@@ -39,6 +60,27 @@ public struct QuitTimeLock: Equatable {
         var lock = QuitTimeLock()
         lock.lock(for: fallbackHours, from: now)
         return lock
+    }
+
+    /// デーモンに繋がったあとの本ロックを決める。#52。
+    ///
+    /// - 本ロック中(保存値を引き継いだなど)なら、そのまま据え置く。宣言された時刻を
+    ///   接続のたびに引き直さない。
+    /// - 仮ロック中なら `hours` で引き直す。このとき保存値は自分が書いた仮の時刻なので
+    ///   引き継がない ―― 引き継ぐと、デーモンから取れた時間が永遠に効かなくなる。
+    /// - まだロックしていなければ、従来どおり保存値を優先して復元する。
+    public static func establishing(
+        from current: QuitTimeLock,
+        persisted: Date?,
+        now: Date,
+        hours: Double
+    ) -> QuitTimeLock {
+        guard current.acceptsFreshDeadline else { return current }
+        return resume(
+            persisted: current.isProvisional ? nil : persisted,
+            now: now,
+            fallbackHours: hours
+        )
     }
 
     /// 「あとN時間M分」の表示/読み上げ用文言。ロックしていなければ `nil`。

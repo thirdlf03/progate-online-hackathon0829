@@ -21,7 +21,7 @@ struct PetDebugMenuEntriesTests {
     private func findItem(_ title: String, in entries: [PetMenuEntry]) -> (@MainActor () -> Void)? {
         for entry in entries {
             switch entry {
-            case .item(let itemTitle, _, let action):
+            case .item(let itemTitle, _, _, let action):
                 if itemTitle == title { return action }
             case .submenu(_, let children):
                 if let action = findItem(title, in: children) { return action }
@@ -54,7 +54,7 @@ struct PetDebugMenuEntriesTests {
     /// 項目のタイトルだけを、区切り線を飛ばして並び順に取り出す。
     private func itemTitles(_ entries: [PetMenuEntry]) -> [String] {
         entries.compactMap { entry in
-            if case .item(let title, _, _) = entry { return title }
+            if case .item(let title, _, _, _) = entry { return title }
             return nil
         }
     }
@@ -62,7 +62,7 @@ struct PetDebugMenuEntriesTests {
     /// チェックの付いている項目のタイトルだけを並び順に取り出す。
     private func checkedTitles(_ entries: [PetMenuEntry]) -> [String] {
         entries.compactMap { entry in
-            if case .item(let title, let isChecked, _) = entry, isChecked { return title }
+            if case .item(let title, let isChecked, _, _) = entry, isChecked { return title }
             return nil
         }
     }
