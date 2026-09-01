@@ -37,22 +37,46 @@ public struct AppWatchdog {
     private let appURL: URL
     private let observer: RunningApplicationObserving
     private let launcher: ApplicationLaunching
+    /// 執行猶予脱出の記録の保存先。記録があり宣言時刻前なら起こさない(#52)。
+    private let escapeRecordURL: URL
+    /// 現在時刻。テストでは固定値を返すクロージャを渡す。
+    private let now: () -> Date
 
     public init(
         bundleIdentifier: String,
         appURL: URL,
         observer: RunningApplicationObserving = NSWorkspaceApplicationObserver(),
-        launcher: ApplicationLaunching = NSWorkspaceApplicationLauncher()
+        launcher: ApplicationLaunching = NSWorkspaceApplicationLauncher(),
+        escapeRecordURL: URL = EscapeRecordStore.url(),
+        now: @escaping () -> Date = { Date() }
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.appURL = appURL
         self.observer = observer
         self.launcher = launcher
+        self.escapeRecordURL = escapeRecordURL
+        self.now = now
     }
 
     /// 動いていなければ起こす。動いていれば何もしない。
+    ///
+    /// 執行猶予脱出の記録があり、まだ宣言時刻(`returnAt`)前なら**起こさない**
+    /// (脱出は「宣言時刻まで本体を止めてよい」約束なので、途中で起こすと約束を破る)。
+    /// 宣言時刻を過ぎていたら記録を削除して通常どおり起こす(宣言時刻に自動復帰させる)。
     public func checkAndReviveIfNeeded() {
         guard !observer.isRunning(bundleIdentifier: bundleIdentifier) else { return }
+        guard !isWithinEscapeWindow() else { return }
         launcher.launch(appURL: appURL)
+    }
+
+    /// 執行猶予脱出の記録があり、まだ宣言時刻前なら true(= 起こさない)。
+    private func isWithinEscapeWindow() -> Bool {
+        guard let record = EscapeRecordStore.load(from: escapeRecordURL) else { return false }
+        guard now() < record.returnAt else {
+            // 宣言時刻を過ぎている。記録は用済みなので消して、通常どおり起こす。
+            EscapeRecordStore.remove(at: escapeRecordURL)
+            return false
+        }
+        return true
     }
 }

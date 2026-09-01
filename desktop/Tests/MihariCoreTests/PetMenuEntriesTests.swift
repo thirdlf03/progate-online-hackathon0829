@@ -77,4 +77,42 @@ struct PetMenuEntriesTests {
             return
         }
     }
+
+    @Test("執行猶予脱出の項目は状態どおりに出る(冷却中は押しても何もしない)")
+    func escapeEntriesReflectTheState() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+
+        // 使えるとき: 宣言ダイアログを開く。
+        actions.escapeMenuState = .available
+        let open = try #require(
+            findItem("どうしても終了する…", in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        open.action()
+        #expect(actions.escapeDialogOpens == 1)
+
+        // カウントダウン中: 取り消し項目に変わり、残り時間を出す。
+        actions.escapeMenuState = .countingDown(remaining: 2 * 60)
+        let cancel = try #require(
+            findItem("終了を取り消す(あと2 分)", in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        cancel.action()
+        #expect(actions.escapeCancels == 1)
+        #expect(findItem("どうしても終了する…", in: PetMenuEntries.make(actions: actions, presenter: presenter)) == nil)
+
+        // 冷却中: 押せない(何もしない)項目として、理由をタイトルに載せる。
+        actions.escapeMenuState = .coolingDown(remaining: 23 * 3600)
+        let cooling = try #require(
+            findItem("どうしても終了する(あと23 時間 0 分で使えます)", in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        cooling.action()
+        #expect(actions.escapeDialogOpens == 1)
+        #expect(actions.escapeCancels == 1)
+
+        // ロック外など hidden のときはどちらも出ない。
+        actions.escapeMenuState = .hidden
+        let hidden = PetMenuEntries.make(actions: actions, presenter: presenter)
+        #expect(findItem("どうしても終了する…", in: hidden) == nil)
+        #expect(findItem("終了を取り消す", in: hidden) == nil)
+    }
 }

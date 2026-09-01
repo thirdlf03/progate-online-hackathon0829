@@ -72,4 +72,43 @@ struct QuitTimeLockTests {
 
         #expect(lock.remainingDescription(now: now.addingTimeInterval(3600)) == nil)
     }
+
+    @Test("resume は未来の保存値を引き継ぐ(4 時間に延び直さない)")
+    func resumeKeepsFuturePersistedDeadline() {
+        let persisted = Date(timeIntervalSince1970: 3600)
+
+        let lock = QuitTimeLock.resume(
+            persisted: persisted,
+            now: Date(timeIntervalSince1970: 0),
+            fallbackHours: 4
+        )
+
+        #expect(lock.unlockAt == persisted)
+        #expect(!lock.isUnlocked(now: Date(timeIntervalSince1970: 1800)))
+        #expect(lock.isUnlocked(now: Date(timeIntervalSince1970: 3600)))
+    }
+
+    @Test("resume は過去の保存値を無視して新規ロックする")
+    func resumeIgnoresPastPersistedDeadline() {
+        let persisted = Date(timeIntervalSince1970: -3600)
+
+        let lock = QuitTimeLock.resume(
+            persisted: persisted,
+            now: Date(timeIntervalSince1970: 0),
+            fallbackHours: 2
+        )
+
+        #expect(lock == QuitTimeLock(unlockAt: Date(timeIntervalSince1970: 2 * 3600)))
+    }
+
+    @Test("resume は保存値が無ければ新規ロックする")
+    func resumeLocksFreshWithoutPersistedValue() {
+        let lock = QuitTimeLock.resume(
+            persisted: nil,
+            now: Date(timeIntervalSince1970: 0),
+            fallbackHours: 4
+        )
+
+        #expect(lock == QuitTimeLock(unlockAt: Date(timeIntervalSince1970: 4 * 3600)))
+    }
 }

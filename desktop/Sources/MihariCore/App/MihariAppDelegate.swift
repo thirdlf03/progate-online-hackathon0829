@@ -35,7 +35,9 @@ public final class MihariAppDelegate: NSObject, NSApplicationDelegate {
     /// `NSApp.reply(toApplicationShouldTerminate:)` で結果を返す。
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor [coordinator] in
-            let allowed = await coordinator.confirmQuit()
+            // Cmd+Q・Dock「終了」・アプリメニュー「終了」は画面からの操作なので、
+            // quitLock OFF のときは「監視中です。終了しますか?」の確認を挟む。
+            let allowed = await coordinator.confirmQuit(interactive: true)
             NSApp.reply(toApplicationShouldTerminate: allowed)
         }
         return .terminateLater
@@ -51,7 +53,8 @@ public final class MihariAppDelegate: NSObject, NSApplicationDelegate {
     private func installTerminationSignalGuard() {
         let guardian = TerminationSignalGuard { [coordinator] in
             Task { @MainActor in
-                guard await coordinator.confirmQuit() else { return }
+                // シグナル経由は画面の確認を挟まない(監視中でも素通し。OFF なら即終了)。
+                guard await coordinator.confirmQuit(interactive: false) else { return }
                 coordinator.shutdown()
                 exit(0)
             }

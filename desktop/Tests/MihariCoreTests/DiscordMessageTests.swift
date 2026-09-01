@@ -193,4 +193,33 @@ struct DiscordMessageTests {
             #expect(!message.contains("<@"))
         }
     }
+
+    // MARK: - 執行猶予脱出 (#52)
+
+    @Test("逃げた投稿は 逃げたプール + 戻ると宣言の副文になる")
+    func escapedMessageHasReturnDeclaration() {
+        var generator = SeededGenerator(seed: 7)
+        let now = Date(timeIntervalSince1970: 0)
+
+        let message = DiscordMessageComposer.escaped(
+            returnAt: now.addingTimeInterval(90 * 60),
+            now: now,
+            using: &generator
+        )
+
+        // 2 行目は小文字表示で、「N 時間 M 分後(HH:mm)に戻ると宣言」を添える。
+        let lines = message.components(separatedBy: "\n")
+        #expect(lines.count == 2)
+        #expect(lines[1].hasPrefix("-# "))
+        #expect(message.contains("分後("))
+        #expect(message.hasSuffix("に戻ると宣言。"))
+    }
+
+    @Test("戻ってきた投稿と戻っていなかった投稿はそれぞれ文面になる")
+    func returnMessagesAreSentences() {
+        #expect(DiscordMessageComposer.returned().hasSuffix("。"))
+        #expect(DiscordMessageComposer.didNotReturn().hasSuffix("。"))
+        // 意味が逆なので、同じ文面にはならない。
+        #expect(DiscordMessageComposer.returned() != DiscordMessageComposer.didNotReturn())
+    }
 }
