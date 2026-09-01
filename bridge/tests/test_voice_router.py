@@ -204,14 +204,13 @@ def test_status_reports_what_is_missing(client: TestClient, auth: dict[str, str]
 
     body = client.get("/voice/status", headers=auth).json()
 
-    # llm_configured / llm_model は macOS アプリが必須としてデコードするので、
-    # 形だけ残して無効にする(Claude 経路はもう無い)。
-    assert body["llm_configured"] is False
-    assert body["llm_model"] == ""
     assert body["screen_llm_configured"] is True
     assert body["screen_llm_model"] == "test-screen-model"
     assert body["voicevox_reachable"] is False
     assert body["voicevox_url"] == "http://engine"
+    # Claude 経路のキーは macOS アプリのデコードも既に任意なので、もう送らない。
+    assert "llm_configured" not in body
+    assert "llm_model" not in body
 
 
 def test_voice_endpoints_need_a_token(client: TestClient) -> None:

@@ -213,8 +213,10 @@ public struct VoiceStatus: Decodable, Equatable, Sendable {
     /// 古いデーモンに繋いだだけで状態表示が丸ごと落ちないよう、無ければ既定に倒す。
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        llmConfigured = try container.decode(Bool.self, forKey: .llmConfigured)
-        llmModel = try container.decode(String.self, forKey: .llmModel)
+        // Claude は廃止したので、llm_configured / llm_model はデーモンが送らなくなった。
+        // 古いデーモン・既存の応答に繋いでも壊れないよう、無ければ既定に倒す。
+        llmConfigured = try container.decodeIfPresent(Bool.self, forKey: .llmConfigured) ?? false
+        llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
         voicevoxURL = try container.decode(String.self, forKey: .voicevoxURL)
         voicevoxSpeaker = try container.decode(Int.self, forKey: .voicevoxSpeaker)
         voicevoxReachable = try container.decode(Bool.self, forKey: .voicevoxReachable)
@@ -224,16 +226,19 @@ public struct VoiceStatus: Decodable, Equatable, Sendable {
     }
 
     /// 画面に出す、いま何が足りないかの一言。
+    ///
+    /// Claude は廃止したので、セリフ生成の成否は出さない。残る情報は
+    /// 画面読み取り(``screenLLMConfigured``)と音声合成(VOICEVOX)だけになる。
     public var summary: String {
-        switch (llmConfigured, voicevoxReachable) {
+        switch (screenLLMConfigured, voicevoxReachable) {
         case (true, true):
             return "セリフも声も使える"
         case (false, true):
-            return "声は出るが、セリフは固定文言（ANTHROPIC_API_KEY 未設定）"
+            return "声は出るが、画面読み取りは未設定（GEMINI_API_KEY 未設定）"
         case (true, false):
-            return "セリフは作れるが無音（VOICEVOX が起動していない）"
+            return "画面は読めるが無音（VOICEVOX が起動していない）"
         case (false, false):
-            return "固定文言・無音（API キーと VOICEVOX の両方が未設定）"
+            return "画面読み取りも無音（API キーと VOICEVOX の両方が未設定）"
         }
     }
 }

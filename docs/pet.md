@@ -284,9 +284,9 @@ Python 3 の標準ライブラリと `/usr/bin/afconvert` だけで動く(`uv` �
 
 | 項目 | 値 |
 | --- | --- |
-| モデル | `claude-haiku-4-5`(`MIHARI_LLM_MODEL` で上書き) |
-| 生成のタイムアウト | 4.0 秒。超えたら固定文言へ |
-| `max_tokens` | 100(`generator.py` の `MAX_TOKENS`) |
+| 画面読み取りモデル | `gemini-3.1-flash-lite`(`MIHARI_SCREEN_MODEL` で上書き) |
+| 画面読み取りのタイムアウト | 6.0 秒。超えたら固定文言へ |
+| 画面読み取りの `max_tokens` | 300(`screen_reader.py` の `MAX_OUTPUT_TOKENS`) |
 | VOICEVOX の話者 | 14(`MIHARI_VOICEVOX_SPEAKER` で上書き) |
 | VOICEVOX のベース URL | `http://127.0.0.1:50021`(`MIHARI_VOICEVOX_URL` で上書き) |
 | 合成のタイムアウト | 10.0 秒。疎通確認は 1.5 秒 |
@@ -651,29 +651,42 @@ Discord への投稿本文の 1 行目に使い、同じ 1 本をペットも喋
 
 **iPhone のスクショを撮れた晒し(段階 4)だけの経路。音声モードとは関係なく走る。** Swift 側がスクショ入りの `SpeechRequest` を bridge へ投げ、返ってきた 1 文と音声をそのままペットに喋らせる(`DetectionEngine.expose`)。返らなければ同封の `iphoneActive` に落ちる。Mac のカメラで撮った晒し・疑い 1〜3・メンヘラモードは bridge を呼ばず、最初から同封セリフを使う。
 
-`bridge/src/device_bridge/voice/generator.py` の `SYSTEM_PROMPT`。「守ること」の中身は
-`bridge/src/device_bridge/voice/persona.py` の `PERSONA_RULES` をそのまま埋め込んだもので、
-Gemini 側(`screen_reader.py`)とも共有している。**人格を変えるときは `persona.py` 1 箇所を直す。**
+`bridge/src/device_bridge/voice/screen_reader.py` の `SYSTEM_PROMPT`。スクショを読んで
+セリフと見立てを 1 回の呼び出しで作る(Claude 経路は廃止済み)。「守ること」の中身は
+`bridge/src/device_bridge/voice/persona.py` の `PERSONA_RULES` をそのまま埋め込んだもの。
+**人格を変えるときは `persona.py` 1 箇所を直す。**
 
 ```
 あなたは macOS 常駐アプリ「Mihari」のデスクトップペット「みはり」です。
-ユーザーをずっと見張っていて、サボっているのを見つけて話しかけます。
+Mac を放っておいてスマホを触っているユーザーに、その画面を見た上で話しかけます。
 
-守ること:
-- 出力はセリフ本文のみ。前置き・説明・鉤括弧・絵文字は付けない。
-- あなたの名前は「みはり」。一人称は「私」、相手は「あなた」。相手の名前は呼ばない。
-- 束縛系。「ずっと見てる」「逃げられない」「私だけ見て」という執着と監視の口調で書く。
-  皮肉ではなく、寂しさと独占欲を出す。
-- 人格否定・侮辱・脅迫はしない。暴力表現(「殺す」「死ね」など)も自傷表現も書かない。
-- 1 文か 2 文、30 文字以内。読み上げるので短く言い切る。敬語ではなくタメ口。
-  「…」で間を作るのはよい。
-- 与えられた状況に具体的に触れる。毎回違う言い回しにする。
-- 日本語で書く。
+渡されるのはユーザーの iPhone のスクリーンショットです。
+何のアプリで何をしているかを見立て、次の項目を持つ JSON だけを返してください。
 
-参考にするトーン:
-- 撮ったよ。逃げられると思った?
-- スマホの方が大事なんだ。全部見えてるからね。
-- ねぇ、聞いてる?無視しないで。
+- app: 推定したアプリ名(例 "YouTube")。分からなければ空文字。
+- activity: 何をしているかを短い名詞句で(12 文字以内。例 "猫の動画" "友達とのチャット")。
+  文にしない。「〜している」「〜中」のような述語は付けず、見ているものだけを書く。
+- category: 次のどれか。
+  - work: 仕事・学習・作業に見える。Slack・メール・カレンダーなど仕事の連絡もここ。
+  - slacking: SNS・動画・ゲーム・漫画など、明らかな息抜き。
+  - neutral: 連絡・地図・設定など、どちらとも言えない。迷ったらこれ。
+  - unknown: ロック画面や真っ暗など、判断できない。
+- line: ペットのセリフ。
+
+line を書くときに守ること:
+{PERSONA_RULES}
+
+さらに line では:
+- アプリ名か見ているものを 1 語入れる(例: "YouTubeの動画、そんなに楽しい?")。
+- work なら「スマホで仕事しているのは分かるけど Mac に戻ってきて」の線でいく。
+- slacking なら軽くいじる。
+- neutral なら「用事が済んだら戻ってきて」の線でいく。
+- unknown なら画面の内容には触れず、iPhone を触っていること自体をいじる。
+- 状況説明の「当たりの強さ」に合わせて当たりの強弱を変える。
+- 画面に写っている個人名・メッセージ本文・金額は引用しない。
+  プライバシーに関わるので、アプリ名と大まかな内容までにとどめる。
+
+応答は JSON のみ。前置き・説明・コードブロックは付けない。
 ```
 
 ユーザープロンプトは `SpeechContext.describe()` が作る 1 行。項目は「、」でつなぐ。
@@ -732,13 +745,12 @@ SSE が流れる。SpringBoard はこの行を切り替えのときにしか出�
 文で返ると日本語が壊れる。`app` は分からなければ空文字で返させ、bridge が `None` に直す
 (Swift 側は `app` が `nil` なら `unknown` 扱いの言い回しに倒す)。
 
-口調のルールは Claude 側と共通で、`bridge/src/device_bridge/voice/persona.py` の `PERSONA_RULES` 1 箇所に置いてある。画面を読むときはこれに加えて「アプリ名か見ているものを 1 語入れる」「`category` ごとの方向」「当たりの強さに合わせて強弱を変える」「個人名・メッセージ本文・金額は引用しない」を指示する。
+口調のルールは `bridge/src/device_bridge/voice/persona.py` の `PERSONA_RULES` 1 箇所に置いてある。画面を読むときはこれに加えて「アプリ名か見ているものを 1 語入れる」「`category` ごとの方向」「当たりの強さに合わせて強弱を変える」「個人名・メッセージ本文・金額は引用しない」を指示する。
 
-落ち方は 3 段。キーが無い・6 秒で返らない・応答が壊れている・セリフが長すぎる(60 文字超)、のどれでも次に落ちる。
+落ち方は 2 段。キーが無い・6 秒で返らない・応答が壊れている・セリフが長すぎる(60 文字超)、のどれでも次に落ちる。
 
 1. Gemini(画面を読んだセリフ)
-2. Claude(`LineGenerator`。画面には触れない従来のセリフ)
-3. 固定文言(下記)
+2. 固定文言(下記)
 
 読めなかった理由は `screen_error` として返るだけで、喋ること自体は止めない。読めたときは `screen`(`app` / `activity` / `category`)も一緒に返り、「撮影」タブで手で試したときはその場に出る。
 
@@ -758,7 +770,7 @@ SSE が流れる。SpringBoard はこの行を切り替えのときにしか出�
   `/voice/speak` の 20 秒より短く切ってある。ここが Discord の文面を待たせる時間そのものになる
 - **`require_line=False` で読む。** セリフは使わないので、`line` が空・60 文字超でも
   `ScreenReadError` にせず空のまま返し、`app` / `activity` / `category` だけを受け取る
-  (`/voice/speak` 側は `require_line=True` なので、セリフが不正なら Claude 経路に落ちる)
+  (`/voice/speak` 側は `require_line=True` なので、セリフが不正なら Gemini を使わず固定文言に落ちる)
 - 読めなかった・キーが無い・スクショが添えられていない場合も **200 で返る。**
   `screen` が `null`、`screen_error` に理由が入るだけで、投稿をやめる理由にはしない
 
@@ -1028,7 +1040,7 @@ LLM が使えない・失敗した・遅すぎたときの保険。`fallback_lin
 | `desktop/Sources/MihariCore/Detection/DetectionThresholds.swift` | 閾値 |
 | `bridge/src/device_bridge/commands/iphone_state.py` | iPhone の状態モデルと前面アプリのログ行の解釈 |
 | `bridge/src/device_bridge/commands/iphone_state_source.py` | 実機の観測(画面状態・前面アプリ・表示名) |
-| `bridge/src/device_bridge/voice/generator.py` | 検知セリフの生成(`SYSTEM_PROMPT`) |
+| `bridge/src/device_bridge/voice/screen_reader.py` | スクショから検知セリフと見立てを生成(`SYSTEM_PROMPT`) |
 | `bridge/src/device_bridge/voice/context.py` | 状況の enum と LLM へ渡す 1 行 |
 | `bridge/src/device_bridge/voice/fallback.py` | 固定文言 |
 | `bridge/src/device_bridge/voice/voicevox.py` | 検知セリフの音声合成 |

@@ -57,10 +57,6 @@ async def voice_status(request: Request) -> dict[str, Any]:
     screen_reader = request.app.state.screen_reader
     voicevox = request.app.state.voicevox
     return {
-        # Claude 経路は削除したので、セリフ生成の LLM は常に無い扱いにする。
-        # キーは macOS アプリが必須としてデコードするため、形だけ残す。
-        "llm_configured": False,
-        "llm_model": "",
         "screen_llm_configured": screen_reader.is_configured,
         "screen_llm_model": screen_reader.model,
         "voicevox_url": voicevox.base_url,

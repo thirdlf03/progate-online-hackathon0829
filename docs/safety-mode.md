@@ -1,0 +1,103 @@
+# セーフティーモード
+
+Mihari の「どれだけ侵襲的に動くか」を機能単位のトグルで決める仕組み。README の「セーフティーモード」が概要で、こちらが詳細。
+
+ソース: `desktop/Sources/MihariCore/Safety/`(設定・ポリシー・ゲート)、`desktop/Sources/MihariCore/Escape/`(執行猶予脱出)、`desktop/Sources/MihariCore/Permissions/`(権限の導出)、`bridge/src/device_bridge/daemon/safety.py`(bridge 側の二重防御)。
+
+## 3 つのモード
+
+ON にしたトグルの本数でモードを決める(`SafetyMode`)。固定ではなく、いつでも切り替えられる。
+
+| モード | 状態 | 表示 |
+| --- | --- | --- |
+| セーフティー | 全トグル OFF(既定) | 「セーフティー」 |
+| カスタム | 一部 ON | 「カスタム(n/7)」 |
+| 無制限 | 全トグル ON | 「無制限」 |
+
+**既定は全 OFF(= セーフティー)**。カメラでの撮影・iPhone の見張り・Discord への投稿・終了のブロックなどは、どれも**本人が ON にしたトグルだけ**が動く。
+
+## 7 つの設定
+
+「何をするか」「どこに送られるか」「必要な権限」は `SafetyFeature` の `summary` / `destination` / `permissionNote` の文言をそのまま使う。各カードの説明文・送り先・権限も、設定画面(`SafetyModeView`)には同じ文言が出る。
+
+| 設定 | 何をするか | どこに送られるか | 必要な権限 |
+| --- | --- | --- | --- |
+| Mac のカメラで撮る | 晒し・メンヘラ時にカメラで 1 枚撮ります。写真はこの Mac の中で判定し、撮影後すぐ削除します | Discord(「Discord に晒す」が ON のとき) | カメラ |
+| iPhone を見張る(触っているかだけ) | iPhone を触っているか(画面の点灯・操作中)だけを見ます。画面の中身は見ません | どこにも送りません | なし(USB 接続) |
+| iPhone の画面を撮る | 晒し・メンヘラ時に iPhone の画面を撮ります。画面の内容は Google Gemini に送られて読み取られます | Google Gemini、Discord(「Discord に晒す」が ON のとき) | tunneld の登録(管理者パスワード) |
+| Discord に晒す | 晒し・メンヘラ・逃げたとき・戻ってきたときに Discord へ投稿します。写真や画面を撮る設定が OFF なら文面だけです | Discord | なし |
+| 説教中は画面を占領する | 晒しのとき、再生中の音楽を止めて全画面で説教します。既定 90 秒(最長 300 秒)で必ず解除されます | どこにも送りません | オートメーション(ミュージック) |
+| 監視中は終了させない | アプリを起動した瞬間から、決めた時間(既定 4 時間)は終了できなくなります。Mac はスリープしませんが画面は消えます | どこにも送りません | なし |
+| スクショに写り込む | あなたが撮ったスクリーンショットに、あとからペットを描き足して上書き保存します | どこにも送りません | なし |
+
+依存関係: **「iPhone の画面を撮る」は「iPhone を見張る」が ON のときだけ選べる**。親を OFF にすると従属も一緒に OFF になる(`SafetyFeature.requires` / `dependents`)。
+
+権限はトグルから導出する(`PermissionKind`)。全 OFF なら**TCC 権限を 1 つも要求しない**。カメラは「Mac のカメラで撮る」が ON のときだけ必須、オートメーション・モーションは任意。画面収録はトグルと紐づかず、デバッグの Mac スクショを撮るときだけ使う。
+
+## 設定を変えるとき
+
+変更は `SafetyPolicy` が判定する。監視中(ロック中も含む)かどうかで可否が変わる。
+
+| 方向 | ルール |
+| --- | --- |
+| ON(緩める) | **監視していないときだけ**。監視中は一切 ON にできない |
+| OFF(締める) | **常に即時**。ただし「監視中は終了させない」は監視中に OFF にできない |
+
+### クーリングオフ(24 時間)
+
+「あとで設定を変えられるようにする」(既定 ON)を **OFF** にしている間は、締める方向の変更(OFF にすること・「あとで設定を変えられるようにする」を ON に戻すこと)が即時ではなく **24 時間後の予約**になる。予約は設定画面のカードと最下部に表示され、**取り消せる**。予約が発効すると、**その予約に含まれる機能が OFF になる**。「あとで設定を変えられるようにする」を **ON に戻す変更を予約していた場合だけ**、それも同時に ON に戻る(`restoresChangeability` が true のときのみ)。この 2 つは**別々に起こりうる**——機能を OFF にする予約をしていても変更容易性が戻るとは限らず、変更容易性だけを戻す予約もありうる。
+
+「全部 OFF」しても、監視中は「監視中は終了させない」だけが残る(それ以外の機能は予約・即時で OFF になる)。
+
+## どうしても終了したいとき(執行猶予脱出)
+
+**「監視中は終了させない」でロックされているときの正規の出口**(#52)。`Escape/` が担う。
+
+1. メニューから「どうしても終了する…」を選び、**戻る時刻を宣言**する
+   - 戻るまでの時間は 15 分〜8 時間、**15 分刻み**で、ロック終了を超えない範囲(`EscapePolicy`)。
+2. **10 分のカウントダウン**が始まる(途中で取り消せる)
+3. カウントダウンが終わると終了する。**watchdog が宣言した時刻に自動で再起動**して監視を再開する
+4. 「Discord に晒す」が ON なら「逃げた」「戻ってきた / 戻っていなかった」を投稿する(戻り判定は宣言時刻に Mac を触っているかどうか)
+
+**前回使ってから 24 時間は使えない**(冷却)。使える状態かをメニュー項目が表示する。
+
+## 初回起動の流れ
+
+起動時、モード選択を済ませていなければ**オンボーディングを 1 回だけ**出す(`AppCoordinator.launch()`)。
+
+1. **モードを選ぶ**画面(`SafetyModeView`)。トグルを ON にできる
+2. **必要な権限だけ要求**(`OnboardingView`)。全 OFF なら権限は無く、このステップは**飛ばして即座に監視開始**
+3. **始める**(即監視開始)。モード選択を済ませたことは記録される(`SafetySettingsStore.hasCompletedModeSelection`。保存先は UserDefaults キー `safety.hasChosenMode`)
+
+既存インストールの**アップデート後も初回の 1 回だけ**出る。以降は、必須権限(ON にしたトグルから決まる)が欠けているときだけ「権限の確認」ウィンドウが出る。
+
+## アンインストール
+
+**アプリ内から:** ペットを右クリック → 設定… → 「Mihari をアンインストール…」。監視中(ロック中)は不可。
+
+**手動で完全に消す場合**(アプリもしくは補助プロセスが止まっていないときはコマンドを打つ順に注意):
+
+```sh
+launchctl bootout gui/$(id -u)/com.thirdlf03.mihari.watchdog
+sudo launchctl bootout system/com.thirdlf03.mihari.tunneld
+rm -rf ~/.mihari
+defaults delete com.thirdlf03.mihari
+```
+
+- 1 行目は監視プロセス(`MihariWatchdog`、LaunchAgent)の登録を外す。label は `WatchdogSetup.label`(`com.thirdlf03.mihari.watchdog`)。
+- 2 行目は iPhone スクショ用の tunneld(LaunchDaemon)の登録を外す。label は `bridge/scripts/uninstall_tunneld_daemon.sh` の `com.thirdlf03.mihari.tunneld`。root 権限が必要なので `sudo` を付ける。
+- 3・4 行目で、保存した設定(`~/.mihari`)と `UserDefaults` を消す。
+
+最後に `desktop/Mihari.app` をゴミ箱へ入れる。
+
+## 仕様上の限界
+
+- **電源に繋いでいないときに蓋を閉じるとスリープすることがある**。蓋を閉じたままの監視は保証しない。
+- **`kill -9` + `launchctl bootout` による強制停止は塞げない**。これは設計上、塞がない。開発用の `make kill` がそれに当たる。
+
+## 担保と開発者向け
+
+- **二重防御**: 機能の入口で **Swift(`SafetyGate`)が OFF を弾き**、さらに**bridge も 403 で拒否する**(`daemon/safety.py` の `require_feature`)。Swift にバグがあっても、OFF の機能はデーモンまで届かない。bridge の既定は全 OFF。
+- デバッグメニュー・検証用の 10 タブ画面は、**`MIHARI_DEBUG_UI=1` のときだけ**出す(`AppCoordinator.isDebugUIRequested`)。
+- **`MIHARI_SAFETY_ENABLE`**: 開発用の起動時上書き(保存はしない)。値は `all`(全 ON)か、`SafetyFeature` の rawValue(`macCamera` など)をカンマ区切り。次の起動は保存値に戻る(`SafetySettingsStore.parseEnvironment`)。
+- **`make kill`**: 開発用の完全停止。本体を SIGKILL → watchdog の LaunchAgent を bootout → 監視プロセスを SIGKILL → plist 削除、の順で実行する。**仕様上の限界の「強制停止」はこのために残してある**。
