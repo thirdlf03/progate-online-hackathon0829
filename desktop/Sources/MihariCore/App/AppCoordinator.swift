@@ -24,6 +24,10 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     public let voiceModeStore: VoiceModeStore
     /// セーフティートグルの設定とポリシー。#49。
     public let safety: SafetySettingsStore
+    /// iPhone スクショに必要な tunneld の常駐。オンボーディングで iphoneScreenshot を
+    /// ON にしたときと、設定画面から ON にしたときに登録を促すために持つ(#51 が
+    /// この形に揃える予定。このブランチではここで保持する)。
+    public let tunneld = TunneldModel()
     public let discord = DiscordController()
     public let attendance: AttendanceModel
     public let detection: DetectionEngine
@@ -165,17 +169,24 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     // MARK: - 起動
 
-    /// 起動直後に一度だけ呼ぶ。権限が揃っているかで、権限画面を出すか見張り始めるかを決める。
+    /// 起動直後に一度だけ呼ぶ。まずセーフティートグルから要求範囲を絞り、
+    /// 未選択ならモード選択 → 権限のオンボーディング、揃っていなければ権限画面、
+    /// どちらも不要なら見張りを始める。
     public func launch() {
+        permissions.apply(settings: safety.settings)
         permissions.refresh()
 
         if Self.isDebugUIRequested {
             showDebugWindow()
         }
 
-        // 初回起動、または必須権限が欠けているうちは見張らない。
-        // 撮れも送れもしない状態で常駐しても、黙って失敗し続けるだけになる。
-        if !permissions.hasCompletedFirstLaunch || !permissions.isRequiredSatisfied {
+        // モード選択を済ませていなければ、全 OFF のまま 1 回だけオンボーディングを
+        // 見せる。既存インストールのアップデート後もここに来る。
+        if !safety.hasCompletedModeSelection {
+            showOnboardingFlow()
+        } else if !permissions.isRequiredSatisfied {
+            // 必須権限が欠けているうちは見張らない。
+            // 撮れも送れもしない状態で常駐しても、黙って失敗し続けるだけになる。
             showPermissionWindow(canStart: true)
         } else {
             begin()
@@ -337,6 +348,26 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
         windows.showDebug { RootView(coordinator: self) }
     }
 
+    /// セーフティーのモード選択 → 権限確認のオンボーディングを出す。
+    ///
+    /// 「次へ」でオンボーディングを終えるとき、モード選択を済ませたことを記録して
+    /// ウィンドウを閉じ、そのまま見張りを始める。
+    private func showOnboardingFlow() {
+        windows.showOnboarding {
+            OnboardingFlowView(
+                safety: safety,
+                permissions: permissions,
+                tunneld: tunneld,
+                onStart: { [weak self] in
+                    guard let self else { return }
+                    safety.markModeSelectionCompleted()
+                    windows.closeOnboarding()
+                    begin()
+                }
+            )
+        }
+    }
+
     // MARK: - PetMenuActions
 
     public func startWatching() {
@@ -429,6 +460,32 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
 
     public func openDiscordSettings() {
         windows.showDiscord { DiscordView(discord: discord, daemon: daemon) }
+    }
+
+    /// セーフティーの設定画面を開く。監視中に変えた `isWatching` を画面に映すため、
+    /// コーディネーターを観察するラッパー経由で `SafetyModeView` を組み立て直す。
+    public func openSafetySettings() {
+        windows.showSafety {
+            SafetySettingsHost(coordinator: self)
+        }
+    }
+
+    /// セーフティーの設定画面を閉じる。`SafetyModeView` の「閉じる」から呼ばれる。
+    func closeSafety() {
+        windows.closeSafety()
+    }
+
+    /// 設定画面で ON にした機能の事後処理。オンボーディング側(`OnboardingFlowView`)
+    /// にも同じ意味の動きがある。
+    func handleFeatureEnabled(_ feature: SafetyFeature) {
+        Task {
+            await permissions.request(for: feature)
+            guard feature == .iphoneScreenshot else { return }
+            // すでに常駐していれば管理者パスワードダイアログは出さない。
+            if tunneld.status != .running {
+                await tunneld.install()
+            }
+        }
     }
 
     public func openPermissions() {
@@ -747,5 +804,29 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     nonisolated private static func visionLabel(for data: Data) -> SpeechRequest.VisionLabel {
         guard let image = try? CaptureImageCodec.decode(data) else { return .unknown }
         return VisionLabelClassifier.classify(outcome: FaceVisionAnalyzer.analyze(image))
+    }
+}
+
+/// セーフティー設定画面のルート View。
+///
+/// `isWatching` は設定画面を開いている間に変わりうる(メニューから監視を止める /
+/// 再開するため)。コーディネーターを `@ObservedObject` で観察して `SafetyModeView` を
+/// 組み立て直すことで、開いたままの `isWatching` の変化を画面に映す。
+/// オンボーディングは常に false なので、このラッパーは設定画面専用。
+@MainActor
+private struct SafetySettingsHost: View {
+    @ObservedObject var coordinator: AppCoordinator
+
+    var body: some View {
+        SafetyModeView(
+            safety: coordinator.safety,
+            isWatching: coordinator.isWatching,
+            context: .settings(onClose: { [weak coordinator] in
+                coordinator?.closeSafety()
+            }),
+            onFeatureEnabled: { [weak coordinator] feature in
+                coordinator?.handleFeatureEnabled(feature)
+            }
+        )
     }
 }

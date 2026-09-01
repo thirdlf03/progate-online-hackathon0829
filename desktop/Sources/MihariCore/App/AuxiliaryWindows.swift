@@ -10,6 +10,8 @@ import SwiftUI
 final class AuxiliaryWindows {
 
     private var permissions: NSWindow?
+    private var onboarding: NSWindow?
+    private var safety: NSWindow?
     private var discord: NSWindow?
     private var debug: NSWindow?
 
@@ -28,6 +30,37 @@ final class AuxiliaryWindows {
     /// 権限の確認画面を閉じる。出していなければ何もしない。
     func closePermissions() {
         permissions?.close()
+    }
+
+    /// セーフティーのオンボーディング(モード選択 → 権限)を出す。
+    /// 既存の権限画面ウィンドウとは別に、design-54.md の 640×720 を持つ。
+    func showOnboarding<Content: View>(@ViewBuilder content: () -> Content) {
+        onboarding = present(
+            onboarding,
+            title: "最初の設定",
+            size: NSSize(width: 640, height: 720),
+            content: content()
+        )
+    }
+
+    /// セーフティーのオンボーディングを閉じる。出していなければ何もしない。
+    func closeOnboarding() {
+        onboarding?.close()
+    }
+
+    /// セーフティーの設定画面(「モードを選ぶ画面」と同じ並び)を出す。
+    func showSafety<Content: View>(@ViewBuilder content: () -> Content) {
+        safety = present(
+            safety,
+            title: "設定",
+            size: NSSize(width: 640, height: 720),
+            content: content()
+        )
+    }
+
+    /// セーフティーの設定画面を閉じる。出していなければ何もしない。
+    func closeSafety() {
+        safety?.close()
     }
 
     /// Discord 設定の画面を出す。

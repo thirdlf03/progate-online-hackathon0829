@@ -13,6 +13,12 @@ public final class PermissionsModel: ObservableObject {
     @Published public private(set) var lastCheckedAt: Date?
     @Published public private(set) var lastMessage: String?
     @Published public private(set) var isRequesting = false
+    /// セーフティートグルから絞り込んだ、いま関連する権限。
+    ///
+    /// #51 のオンボーディングがこの範囲だけを要求・表示する。このブランチでは
+    /// #51 がまだ入っていないため、`apply(settings:)` で決めるだけで、画面の
+    /// 出し分け(従来どおり `allCases`)にはまだ使われていない(最終報告に記載)。
+    @Published public private(set) var relevantKinds: [PermissionKind] = []
 
     private let defaults: UserDefaults
     private let requestPermission: @Sendable (PermissionKind) async -> String
@@ -32,6 +38,29 @@ public final class PermissionsModel: ObservableObject {
         self.requestPermission = requestPermission
         self.checkPermissions = checkPermissions
         self.states = PermissionKind.allCases.reduce(into: [:]) { $0[$1] = .unchecked }
+    }
+
+    /// セーフティー設定に合わせて、要求すべき権限の範囲を絞り込み直す。
+    ///
+    /// ON の機能が要求する権限を、トグルの並び順で重複なく集める。
+    /// `launch()` の先頭で呼ばれる。
+    public func apply(settings: SafetySettings) {
+        var seen = Set<PermissionKind>()
+        var kinds: [PermissionKind] = []
+        for feature in SafetyFeature.allCases where settings.isEnabled(feature) {
+            for kind in PermissionKind.relevant(for: feature) where seen.insert(kind).inserted {
+                kinds.append(kind)
+            }
+        }
+        relevantKinds = kinds
+    }
+
+    /// 機能を ON にした直後に呼ぶ。その機能が必要な権限を順にプロンプトする。
+    /// 必要な権限が無ければ何もしない。
+    public func request(for feature: SafetyFeature) async {
+        for kind in PermissionKind.relevant(for: feature) {
+            await request(kind)
+        }
     }
 
     public func state(for kind: PermissionKind) -> PermissionState {

@@ -77,6 +77,23 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
         }
     }
 
+    /// セーフティーの機能を ON にしたときに、要求すべき権限の一覧。
+    ///
+    /// #51 のオンボーディングが「要求範囲を ON にした機能に絞る」ために使う。
+    /// このブランチでは #51 がまだ入っていないため最小の対応表だけを持ち、
+    /// 画面の内容は `PermissionKind.allCases` の従来どおりで動く(最終報告に記載)。
+    public static func relevant(for feature: SafetyFeature) -> [PermissionKind] {
+        switch feature {
+        case .macCamera: return [.camera]
+        case .iphonePresence: return []  // USB 接続だけで、TCC の権限は要らない
+        case .iphoneScreenshot: return []  // tunneld の登録(管理者パスワード)が要る
+        case .discordExposure: return []
+        case .sermonTakeover: return [.automation]
+        case .quitLock: return []
+        case .photobomb: return [.screenRecording]
+        }
+    }
+
     /// アプリから権限要求 API を叩ける権限だけボタンのラベルを返す。
     /// オートメーションは対象アプリへ実際にイベントを送った瞬間しかプロンプトが出ないため、ここでは要求できない。
     public var requestButtonTitle: String? {

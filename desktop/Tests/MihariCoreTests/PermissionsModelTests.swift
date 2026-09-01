@@ -128,4 +128,40 @@ struct PermissionsModelTests {
         }
         #expect(model.lastMessage != nil)
     }
+
+    @Test("apply(settings:) は ON の機能が要求する権限に絞り込む")
+    func applyNarrowsRelevantKindsToEnabledFeatures() {
+        let model = PermissionsModel(defaults: makeDefaults())
+
+        // 全 OFF なら何も要求しない。
+        model.apply(settings: .default)
+        #expect(model.relevantKinds.isEmpty)
+
+        // ON の機能が要求する権限だけが、トグルの並び順で重複なく並ぶ。
+        var settings = SafetySettings()
+        settings.enabled = [.sermonTakeover, .macCamera]
+        model.apply(settings: settings)
+        #expect(model.relevantKinds == [.camera, .automation])
+
+        // 権限を要求しない機能(quitLock)は増やさない。
+        settings.enabled.insert(.quitLock)
+        model.apply(settings: settings)
+        #expect(model.relevantKinds == [.camera, .automation])
+    }
+
+    @Test("request(for:) はその機能が必要な権限だけをプロンプトする")
+    func requestForFeatureAsksOnlyItsKinds() async {
+        let spy = RequestSpy()
+        let model = PermissionsModel(defaults: makeDefaults(), requestPermission: spy.request)
+
+        await model.request(for: .macCamera)
+        #expect(spy.requested == [.camera])
+
+        // 権限が要らない機能は何も要求しない。
+        await model.request(for: .iphoneScreenshot)
+        #expect(spy.requested == [.camera])
+
+        await model.request(for: .sermonTakeover)
+        #expect(spy.requested == [.camera, .automation])
+    }
 }

@@ -24,6 +24,7 @@ final class StubPetMenuActions: ObservableObject, PetMenuActions {
     func startBreak() {}
     func endBreak() {}
     func openDiscordSettings() {}
+    func openSafetySettings() {}
     func openPermissions() {}
     func toggleStatusPanel() {}
     func setPhotobombEnabled(_ enabled: Bool) { isPhotobombEnabled = enabled }

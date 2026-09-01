@@ -31,6 +31,17 @@ struct PermissionKindTests {
             }
         }
     }
+    @Test("セーフティーの機能から、要求すべき権限が決まる")
+    func relevantKindsFollowFeatures() {
+        #expect(PermissionKind.relevant(for: .macCamera) == [.camera])
+        #expect(PermissionKind.relevant(for: .sermonTakeover) == [.automation])
+        #expect(PermissionKind.relevant(for: .photobomb) == [.screenRecording])
+        // TCC の権限を要求しない機能は空になる。
+        #expect(PermissionKind.relevant(for: .iphonePresence).isEmpty)
+        #expect(PermissionKind.relevant(for: .iphoneScreenshot).isEmpty)
+        #expect(PermissionKind.relevant(for: .discordExposure).isEmpty)
+        #expect(PermissionKind.relevant(for: .quitLock).isEmpty)
+    }
 }
 
 @Suite("必須と任意の切り分け")

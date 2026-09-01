@@ -50,6 +50,10 @@ public enum PetMenuEntries {
             ),
             .separator,
             .item(
+                title: "設定…",
+                action: { actions.openSafetySettings() }
+            ),
+            .item(
                 title: "Discord 設定…",
                 action: { actions.openDiscordSettings() }
             ),
