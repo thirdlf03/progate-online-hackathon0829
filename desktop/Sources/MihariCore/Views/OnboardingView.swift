@@ -9,7 +9,8 @@ public struct OnboardingView: View {
     @ObservedObject var model: PermissionsModel
     /// iPhone スクショに必要な tunneld の常駐状態。TCC の権限ではないが、
     /// 「最初に 1 回だけ承認する」という意味でこの画面に並べる。
-    @StateObject private var tunneld = TunneldModel()
+    /// 解除(ON→OFF)は `AppCoordinator` がトグル購読で行うため、こちらで持たない。
+    @ObservedObject var tunneld: TunneldModel
     /// 「始める」を押したときの処理。必須権限が揃うまでボタンは押せない。
     private let onStart: (() -> Void)?
     /// 「閉じる」を押したときの処理。すでに見張っている状態で開き直したときに使う。
@@ -18,8 +19,14 @@ public struct OnboardingView: View {
     /// - Parameters:
     ///   - onStart: 渡すと「始める」ボタンを出す。必須権限が揃うまで押せない。
     ///   - onClose: 渡すと「閉じる」ボタンを出す。`onStart` を渡したときはそちらが優先される。
-    public init(model: PermissionsModel, onStart: (() -> Void)? = nil, onClose: (() -> Void)? = nil) {
+    public init(
+        model: PermissionsModel,
+        tunneld: TunneldModel,
+        onStart: (() -> Void)? = nil,
+        onClose: (() -> Void)? = nil
+    ) {
         self.model = model
+        self.tunneld = tunneld
         self.onStart = onStart
         self.onClose = onClose
     }
@@ -46,21 +53,23 @@ public struct OnboardingView: View {
             header
 
             VStack(spacing: 0) {
-                ForEach(Array(PermissionKind.allCases.enumerated()), id: \.element.id) { index, kind in
+                ForEach(Array(model.relevantKinds.enumerated()), id: \.element.id) { index, kind in
                     PermissionRow(
                         kind: kind,
                         state: model.state(for: kind),
                         onRequest: { Task { await model.request(kind) } },
                         onOpenSettings: { model.openSettings(for: kind) }
                     )
-                    if index < PermissionKind.allCases.count - 1 {
+                    if index < model.relevantKinds.count - 1 {
                         Divider()
                     }
                 }
             }
             .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
 
-            tunneldSection
+            if model.settings.isEnabled(.iphoneScreenshot) {
+                tunneldSection
+            }
 
             if let message = model.lastMessage {
                 Text(message)

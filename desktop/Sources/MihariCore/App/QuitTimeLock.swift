@@ -27,6 +27,20 @@ public struct QuitTimeLock: Equatable {
         return now >= unlockAt
     }
 
+    /// 終了ロックの復元を決める。#52(quitLock トグル化)。
+    ///
+    /// UserDefaults などに保存されていた解除時刻(`persisted`)が未来ならそれを引き継ぐ。
+    /// 監視を再開した拍子に 4 時間へ延び直して、ユーザーの宣言した時刻を無視しないため。
+    /// 無いか過去なら `fallbackHours` で新規にロックする(過去の保存値は取り残し)。
+    public static func resume(persisted: Date?, now: Date, fallbackHours: Double) -> QuitTimeLock {
+        if let persisted, persisted > now {
+            return QuitTimeLock(unlockAt: persisted)
+        }
+        var lock = QuitTimeLock()
+        lock.lock(for: fallbackHours, from: now)
+        return lock
+    }
+
     /// 「あとN時間M分」の表示/読み上げ用文言。ロックしていなければ `nil`。
     public func remainingDescription(now: Date = Date()) -> String? {
         guard let unlockAt, !isUnlocked(now: now) else { return nil }

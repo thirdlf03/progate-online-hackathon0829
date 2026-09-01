@@ -16,7 +16,11 @@ guard arguments.count > 1 else {
 }
 
 let appURL = URL(fileURLWithPath: arguments[1])
-let watchdog = AppWatchdog(bundleIdentifier: WatchdogSetup.bundleIdentifier, appURL: appURL)
+let watchdog = AppWatchdog(
+    bundleIdentifier: WatchdogSetup.bundleIdentifier,
+    appURL: appURL,
+    escapeRecordURL: EscapeRecordStore.url()
+)
 
 /// 見回りの間隔。短すぎると無駄に CPU を使い、長すぎると「殺してから戻るまで」の
 /// すきま時間が意味を持ち始める。2 秒は caffeinate 的な常駐監視として妥当な線。

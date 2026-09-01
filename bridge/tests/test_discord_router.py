@@ -77,6 +77,14 @@ def service(client: TestClient) -> _StubService:
     return stub
 
 
+@pytest.fixture
+def safe_service(safe_client: TestClient) -> _StubService:
+    """セーフティーが全 OFF のままのクライアントに刺す、同じスタブ。"""
+    stub = _StubService()
+    safe_client.app.state.discord = stub
+    return stub
+
+
 def test_status_reports_the_invite_url(
     client: TestClient, auth: dict[str, str], service: _StubService
 ) -> None:
@@ -309,6 +317,40 @@ def test_discord_endpoints_need_a_token(client: TestClient) -> None:
     assert client.post("/discord/post", json={"text": "x"}).status_code == 401
     assert client.post("/discord/mention", json={"user_id": None}).status_code == 401
     assert client.post("/discord/test", json={}).status_code == 401
+
+
+# ---- セーフティー(既定の全 OFF)での拒否と、OFF でも通る操作 ----------------
+
+
+def test_posting_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str], safe_service: _StubService
+) -> None:
+    # 証拠を投稿して「晒す」ことは、OFF なら拒否する。
+    response = safe_client.post("/discord/post", json={"text": "寝てますね"}, headers=auth)
+
+    assert response.status_code == 403
+    assert "Discord に晒す" in response.json()["detail"]
+
+
+def test_test_post_passes_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str], safe_service: _StubService
+) -> None:
+    # テスト送信は本人の明示操作なので、OFF でも通す。
+    safe_service.selection = ChannelSelection(guild_id=1, channel_id=2)
+
+    response = safe_client.post("/discord/test", json={}, headers=auth)
+
+    assert response.status_code == 200
+    assert response.json() == {"posted": True, "message_id": 999}
+
+
+def test_lock_hours_passes_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str], safe_service: _StubService
+) -> None:
+    response = safe_client.get("/discord/lock-hours", headers=auth)
+
+    assert response.status_code == 200
+    assert response.json() == {"lock_hours": 4.0}
 
 
 # ---- ここから下は `DiscordService.post` そのもの。Bot とチャンネルだけをモックにする。

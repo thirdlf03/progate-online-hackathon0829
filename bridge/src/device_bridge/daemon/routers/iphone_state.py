@@ -18,7 +18,8 @@ from fastapi import APIRouter, Depends, Request
 
 from device_bridge.commands import iphone_state, iphone_state_source
 from device_bridge.daemon.auth import verify_token
-from device_bridge.daemon.events import Event, EventBus
+from device_bridge.daemon.events import Event
+from device_bridge.daemon.safety import SafetyState, require_feature
 
 router = APIRouter(prefix="/iphone", tags=["iphone"], dependencies=[Depends(verify_token)])
 
@@ -27,7 +28,11 @@ _TASK_ATTR = "iphone_state_task"
 _STOP_ATTR = "iphone_state_stop"
 
 
-@router.get("/state")
+@router.get(
+    "/state",
+    # 「iPhone を見張る」が OFF なら、状態の取得(監視の起動)そのものを拒否する。
+    dependencies=[Depends(require_feature("iphone_presence"))],
+)
 async def get_state(request: Request) -> dict[str, Any]:
     """現在の iPhone 状態を返す。呼ばれた時点で監視が始まっていなければここで始める。"""
     store = _ensure_monitor_started(request)
@@ -41,8 +46,7 @@ def _ensure_monitor_started(request: Request) -> iphone_state.IphoneStateStore:
     if store is not None:
         return store
 
-    bus: EventBus = app_state.events
-    store = iphone_state.IphoneStateStore(on_change=lambda snapshot: _publish(bus, snapshot))
+    store = iphone_state.IphoneStateStore(on_change=lambda snapshot: _publish(app_state, snapshot))
     stop_event = asyncio.Event()
     task = asyncio.create_task(
         iphone_state.run_monitor(
@@ -75,6 +79,13 @@ async def stop_monitor(app_state: Any) -> None:
         await task
 
 
-def _publish(bus: EventBus, snapshot: iphone_state.IphoneStateSnapshot) -> None:
-    """状態変化を ``iphone.state`` という名前空間の SSE イベントとして流す。"""
-    bus.publish(Event(name="iphone.state", payload=snapshot.to_payload()))
+def _publish(app_state: Any, snapshot: iphone_state.IphoneStateSnapshot) -> None:
+    """状態変化を ``iphone.state`` という名前空間の SSE イベントとして流す。
+
+    セーフティーで「iPhone を見張る」を OFF にした直後、モニタタスクが止まるまでの
+    間に観測された変化は流さない。OFF の状態が Swift 側へ漏れ続けるのを防ぐ。
+    """
+    safety: SafetyState = getattr(app_state, "safety", SafetyState())
+    if not safety.iphone_presence:
+        return
+    app_state.events.publish(Event(name="iphone.state", payload=snapshot.to_payload()))

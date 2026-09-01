@@ -18,7 +18,6 @@ struct PermissionRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(kind.title).font(.body).bold()
-                    badge
                 }
                 Text(kind.purpose)
                     .font(.caption)
@@ -63,20 +62,7 @@ struct PermissionRow: View {
         .padding(.vertical, 9)
     }
 
-    /// 必須か任意か。必須が 1 つでも欠けていると監視を始められないので、ひと目で分かるようにする。
-    private var badge: some View {
-        Text(kind.isRequired ? "必須" : "任意")
-            .font(.system(size: 10))
-            .bold()
-            .foregroundStyle(kind.isRequired ? Color.orange : Color.secondary)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(
-                (kind.isRequired ? Color.orange : Color.secondary).opacity(0.15),
-                in: RoundedRectangle(cornerRadius: 4)
-            )
-    }
-
+    /// 権限の状態を示すインジケーター。
     private var indicatorColor: Color {
         switch state.grant {
         case .granted: return .green

@@ -14,6 +14,7 @@ final class AuxiliaryWindows {
     private var safety: NSWindow?
     private var discord: NSWindow?
     private var debug: NSWindow?
+    private var escape: NSWindow?
 
     /// 権限の確認画面を出す(すでに出ていれば中身を差し替えて前面へ)。
     ///
@@ -81,6 +82,21 @@ final class AuxiliaryWindows {
             size: NSSize(width: 940, height: 720),
             content: content()
         )
+    }
+
+    /// 執行猶予脱出の宣言ダイアログを出す。
+    func showEscape<Content: View>(@ViewBuilder content: () -> Content) {
+        escape = present(
+            escape,
+            title: "終了の宣言",
+            size: NSSize(width: 420, height: 200),
+            content: content()
+        )
+    }
+
+    /// 実行猶予脱出の宣言ダイアログを閉じる。出していなければ何もしない。
+    func closeEscape() {
+        escape?.close()
     }
 
     /// 既にあるウィンドウなら中身を差し替えて前面に出し、無ければ作る。

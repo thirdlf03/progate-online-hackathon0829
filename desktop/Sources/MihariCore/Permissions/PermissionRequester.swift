@@ -2,7 +2,6 @@ import AVFoundation
 import CoreGraphics
 import CoreMotion
 import Foundation
-import IOKit.hidsystem
 import os
 
 /// 権限のプロンプトを出す。ユーザーがボタンを押したときだけ呼ぶ。
@@ -18,11 +17,6 @@ public enum PermissionRequester {
             logger.info("camera requestAccess -> \(granted, privacy: .public)")
             return "カメラ: \(granted ? "許可された" : "許可されなかった")"
 
-        case .microphone:
-            let granted = await AVCaptureDevice.requestAccess(for: .audio)
-            logger.info("microphone requestAccess -> \(granted, privacy: .public)")
-            return "マイク: \(granted ? "許可された" : "許可されなかった")"
-
         case .screenRecording:
             // 初回だけプロンプトが出る。2 回目以降は false のままで、システム設定から許可するしかない。
             let granted = CGRequestScreenCaptureAccess()
@@ -30,11 +24,6 @@ public enum PermissionRequester {
             return granted
                 ? "画面収録: 許可された"
                 : "画面収録: プロンプトが出なければ、システム設定から許可してアプリを再起動する"
-
-        case .inputMonitoring:
-            let granted = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-            logger.info("IOHIDRequestAccess -> \(granted, privacy: .public)")
-            return "入力監視: \(granted ? "許可された" : "許可されなかった")"
 
         case .motion:
             return await requestMotion()

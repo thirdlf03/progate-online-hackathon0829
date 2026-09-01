@@ -9,16 +9,19 @@ public protocol SleepPreventing: AnyObject {
     func stop()
 }
 
-/// `IOPMAssertionCreateWithName` でディスプレイスリープとアイドルスリープの両方を止める。
+/// `IOPMAssertionCreateWithName` でアイドルスリープを止める。
 ///
-/// `caffeinate -d -i` と同じ効果を、子プロセスを増やさず本体プロセスの assertion だけで実現する。
-/// 監視中に画面が暗転して撮影・検知が止まってしまう事態を防ぐのが目的。
+/// `caffeinate -i` と同じ効果を、子プロセスを増やさず本体プロセスの assertion だけで実現する。
+/// 監視中にシステムがスリープして撮影・検知が止まってしまう事態を防ぐのが目的。
+/// ディスプレイスリープ(`NoDisplaySleep`)は**取得しない** —— 画面は消えてよい(#52)。
 public final class IOPMSleepPreventer: SleepPreventing {
 
     private static let logger = Logger(subsystem: "com.thirdlf03.mihari", category: "sleep-preventer")
 
     private let reason: String
     private var assertionIDs: [IOPMAssertionID] = []
+    /// いま保持している assertion の種別名。取得する種別を検査できるように公開しておく(#52)。
+    public private(set) var assertionTypes: [String] = []
 
     /// - Parameter reason: システム設定の「アクティビティ」に出る理由文言。
     public init(reason: String = "Mihari が監視中") {
@@ -28,26 +31,21 @@ public final class IOPMSleepPreventer: SleepPreventing {
     public func start() {
         guard assertionIDs.isEmpty else { return }
 
-        let types: [String] = [
-            kIOPMAssertionTypeNoDisplaySleep,
-            kIOPMAssertionTypeNoIdleSleep,
-        ]
-        var acquired: [IOPMAssertionID] = []
-        for type in types {
-            var id: IOPMAssertionID = 0
-            let result = IOPMAssertionCreateWithName(
-                type as CFString,
-                IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                reason as CFString,
-                &id
+        var id: IOPMAssertionID = 0
+        let result = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypeNoIdleSleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            reason as CFString,
+            &id
+        )
+        guard result == kIOReturnSuccess else {
+            Self.logger.error(
+                "assertion 取得に失敗(type=\(kIOPMAssertionTypeNoIdleSleep, privacy: .public), result=\(result))"
             )
-            guard result == kIOReturnSuccess else {
-                Self.logger.error("assertion 取得に失敗(type=\(type, privacy: .public), result=\(result))")
-                continue
-            }
-            acquired.append(id)
+            return
         }
-        assertionIDs = acquired
+        assertionIDs = [id]
+        assertionTypes = [kIOPMAssertionTypeNoIdleSleep]
     }
 
     public func stop() {
@@ -56,6 +54,7 @@ public final class IOPMSleepPreventer: SleepPreventing {
             IOPMAssertionRelease(id)
         }
         assertionIDs = []
+        assertionTypes = []
     }
 
     deinit {

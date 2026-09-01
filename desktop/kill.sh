@@ -61,4 +61,9 @@ if launchctl print "${SERVICE}" >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "==> 執行猶予脱出の記録(escape.json)を削除"
+# 開発用の完全停止なので、残っていると watchdog が「宣言時刻まで起こさない」と
+# 判断して復帰しないことがある。ここで消して、次回は普通に起動できるようにする。
+rm -f "${HOME}/Library/Application Support/Mihari/escape.json"
+
 echo "==> 停止した: Mihari / ${LABEL}"

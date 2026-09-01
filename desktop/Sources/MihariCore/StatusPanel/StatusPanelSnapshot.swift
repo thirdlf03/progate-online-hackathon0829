@@ -23,6 +23,12 @@ public struct StatusPanelSnapshot: Equatable, Sendable {
     /// まだ評価していない行に出す文字。
     public static let placeholder = "—"
 
+    /// いまのセーフティーモード。「カスタム(3/7)」、予約があれば
+    /// 「カスタム(3/7)・変更予約 あと 21 時間」。
+    public let modeText: String
+    /// iPhone を見張っているか(`.iphonePresence` が ON か)。OFF なら iPhone の行は「見ていない」。
+    public let iphoneWatched: Bool
+
     /// 無操作バーの升目の数。
     public static let barCells = 10
 
@@ -65,6 +71,7 @@ public struct StatusPanelSnapshot: Equatable, Sendable {
     ///   - lastEvidenceAt: 最後に証拠を撮った時刻。まだ撮っていなければ nil。
     ///   - lastLog: 判断の記録の先頭(最新)。
     ///   - daemonPort: デーモンに繋がっていればそのポート。繋がっていなければ nil。
+    ///   - settings: セーフティーの設定。モード行と iPhone を見張っているかが決まる。
     public static func make(
         isWatching: Bool,
         state: DetectionState,
@@ -75,11 +82,15 @@ public struct StatusPanelSnapshot: Equatable, Sendable {
         lastEvidenceAt: Date?,
         lastLog: DetectionLogEntry?,
         daemonPort: Int?,
+        settings: SafetySettings = .default,
         now: Date = Date()
     ) -> StatusPanelSnapshot {
         let onBreak = breakUntil.map { now < $0 } ?? false
+        let watched = settings.isEnabled(.iphonePresence)
 
         return StatusPanelSnapshot(
+            modeText: modeText(settings: settings, now: now),
+            iphoneWatched: watched,
             tone: tone(isWatching: isWatching, onBreak: onBreak, state: state),
             stateText: "\(state.label)(段階 \(escalationStage))",
             watchText: watchText(isWatching: isWatching, breakUntil: onBreak ? breakUntil : nil, now: now),
@@ -87,7 +98,9 @@ public struct StatusPanelSnapshot: Equatable, Sendable {
             idleText: signals.map { "\(Int($0.macIdleSeconds)) 秒" } ?? placeholder,
             idleProgress: idleProgress(signals: signals, thresholds: thresholds),
             thresholdText: "疑い \(Int(thresholds.suspectSeconds)) / 段ごと \(Int(thresholds.stageIntervalSeconds))",
-            iphoneText: signals.map { iphoneText($0.iphone) } ?? placeholder,
+            iphoneText: watched
+                ? (signals.map { iphoneText($0.iphone) } ?? placeholder)
+                : "見ていない",
             musicText: signals?.music.label ?? placeholder,
             frontmostAppText: signals.map { $0.frontmostApp ?? "不明" } ?? placeholder,
             attendanceText: signals.map { attendanceText(signals: $0, thresholds: thresholds) } ?? placeholder,
@@ -126,6 +139,27 @@ public struct StatusPanelSnapshot: Equatable, Sendable {
         return min(1, max(0, signals.macIdleSeconds / thresholds.suspectSeconds))
     }
 
+    /// モードの 1 行。「カスタム(3/7)」に予約があれば残り時間を足す。
+    private static func modeText(settings: SafetySettings, now: Date) -> String {
+        var text = settings.mode.label
+        if let pending = settings.pendingChange {
+            text += "・変更予約 \(pendingChangeText(until: pending.effectiveAt, now: now))"
+        }
+        return text
+    }
+
+    /// 変更予約の残り時間を「あと 21 時間」「あと 3 時間 25 分」の形で書く。
+    /// メニューのモード行(「変更予約 あと …」)と共用する。
+    public static func pendingChangeText(until effectiveAt: Date, now: Date) -> String {
+        let total = max(0, Int(effectiveAt.timeIntervalSince(now).rounded()))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 && minutes > 0 { return "あと \(hours) 時間 \(minutes) 分" }
+        if hours > 0 { return "あと \(hours) 時間" }
+        if minutes > 0 { return "あと \(minutes) 分" }
+        return "あとすぐ"
+    }
+
     private static func iphoneText(_ state: SpeechRequest.IPhoneState) -> String {
         switch state {
         case .active: return "操作中"
@@ -156,11 +190,12 @@ public struct StatusPanelSnapshot: Equatable, Sendable {
 }
 
 extension StatusPanelSnapshot {
-    /// 動いているエンジンとデーモンから組み立てる。画面から呼ぶのはこちら。
+    /// 動いているエンジンとデーモン・セーフティー設定から組み立てる。画面から呼ぶのはこちら。
     @MainActor
     public static func make(
         engine: DetectionEngine,
         daemon: DaemonController,
+        safety: SafetySettingsStore,
         now: Date = Date()
     ) -> StatusPanelSnapshot {
         make(
@@ -173,6 +208,7 @@ extension StatusPanelSnapshot {
             lastEvidenceAt: engine.lastEvidenceAt,
             lastLog: engine.log.first,
             daemonPort: daemonPort(of: daemon),
+            settings: safety.settings,
             now: now
         )
     }

@@ -94,7 +94,10 @@ public struct OnboardingFlowView: View {
             .padding(.horizontal, 20)
             .padding(.top, 16)
 
-            OnboardingView(model: permissions, onStart: onStart)
+            // ステップ 1 と同じ tunneld インスタンスを渡す。ステップ 1 で ON にした
+            // tunneld が別インスタンスだと、「登録する…」が二重の管理者パスワード
+            // ダイアログを呼んでしまうため。
+            OnboardingView(model: permissions, tunneld: tunneld, onStart: onStart)
         }
     }
 

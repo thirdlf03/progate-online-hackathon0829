@@ -1,42 +1,63 @@
 import Foundation
 
 /// Mihari が使う TCC 権限。オンボーディング画面にはこの順で並ぶ。
+///
+/// マイクと入力監視は使用コードが無いため扱わない(#51)。見せるか・必須かは
+/// セーフティートグルから導出する(`relevant(for:)` / `required(for:)`)。
 public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     case camera
-    case microphone
     case screenRecording
-    case inputMonitoring
     case automation
     case motion
 
     public var id: String { rawValue }
 
-    /// アプリからプロンプトを出せる権限。初回起動時はこの順に要求する。
-    /// モーションは AirPods が接続されていないとプロンプトが出ないため、まとめ要求からは外す。
-    public static var requestableOnLaunch: [PermissionKind] {
-        [.camera, .microphone, .screenRecording, .inputMonitoring]
-    }
-
-    /// 見張りを始めるのに欠かせない権限か。
+    /// この権限を必要とするトグル。nil は「トグルと無関係(常に任意)」。
     ///
-    /// これが下りていないと「サボりを見つけて証拠を撮る」が成り立たないため、
-    /// 揃うまでは監視を始めない。オートメーションとモーションは無くても中核は動くので任意にする。
-    public var isRequired: Bool {
+    /// 画面収録はデバッグタブの Mac スクショ専用、モーションは AirPods 首振りで、
+    /// どちらもセーフティートグルとは紐づかない。
+    public var feature: SafetyFeature? {
         switch self {
-        case .camera, .microphone, .screenRecording, .inputMonitoring: return true
-        case .automation, .motion: return false
+        case .camera: return .macCamera
+        case .automation: return .sermonTakeover
+        case .screenRecording: return nil
+        case .motion: return nil
         }
     }
 
-    /// 見張りを始めるのに欠かせない権限の一覧。
-    public static let required: [PermissionKind] = allCases.filter(\.isRequired)
+    /// 設定で意味を持つ(画面に出す)権限。screenRecording は含めない。
+    ///
+    /// トグルに紐づく権限は対応するトグルが ON のときだけ出し、トグルと
+    /// 無関係の権限(モーション)は常に出す。screenRecording はオンボーディングには
+    /// 出さず、デバッグタブで撮る直前に要求する。
+    public static func relevant(for settings: SafetySettings) -> [PermissionKind] {
+        allCases.filter { kind in
+            guard let feature = kind.feature else { return kind != .screenRecording }
+            return settings.isEnabled(feature)
+        }
+    }
+
+    /// 揃わないと始められない権限。macCamera ON のときの camera のみ。
+    ///
+    /// automation は sermonTakeover ON でも「任意」に留める: 実際に Music へ命令を
+    /// 送る瞬間までプロンプトが出せず、必須にすると始められなくなるため。
+    public static func required(for settings: SafetySettings) -> [PermissionKind] {
+        guard settings.isEnabled(.macCamera) else { return [] }
+        return [.camera]
+    }
+
+    /// 起動時・「まとめて許可を求める」でプロンプトできるもの。
+    ///
+    /// `relevant(for:)` のうち `requestButtonTitle != nil` かつモーション以外。
+    /// モーションは AirPods が接続されていないとプロンプトが出ないため、まとめ要求からは外す。
+    public static func requestableOnLaunch(for settings: SafetySettings) -> [PermissionKind] {
+        relevant(for: settings).filter { $0.requestButtonTitle != nil && $0 != .motion }
+    }
 
     public var title: String {
         switch self {
         case .camera: return "カメラ"
-        case .microphone: return "マイク"
         case .screenRecording: return "画面収録"
-        case .inputMonitoring: return "入力監視"
         case .automation: return "オートメーション"
         case .motion: return "モーション(AirPods)"
         }
@@ -46,9 +67,7 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     public var purpose: String {
         switch self {
         case .camera: return "サボり検知時に証拠写真を1枚撮る"
-        case .microphone: return "在席状況の判定に使う(音声は保存しない)"
-        case .screenRecording: return "サボり検知時に画面のスクショを撮る"
-        case .inputMonitoring: return "キーやマウスの操作有無からアイドルを判定する"
+        case .screenRecording: return "デバッグ画面から Mac のスクリーンショットを撮るときだけ使います"
         case .automation: return "説教中に再生中の音楽を止める"
         case .motion: return "AirPods の首振りを はい/いいえ として受け取る"
         }
@@ -58,9 +77,7 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     public var api: String {
         switch self {
         case .camera: return "AVCaptureDevice.authorizationStatus(for: .video)"
-        case .microphone: return "AVCaptureDevice.authorizationStatus(for: .audio)"
         case .screenRecording: return "CGPreflightScreenCaptureAccess()"
-        case .inputMonitoring: return "IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)"
         case .automation: return "AEDeterminePermissionToAutomateTarget(com.apple.Music)"
         case .motion: return "CMHeadphoneMotionManager.authorizationStatus()"
         }
@@ -69,28 +86,9 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     public var pane: PrivacyPane {
         switch self {
         case .camera: return .camera
-        case .microphone: return .microphone
         case .screenRecording: return .screenCapture
-        case .inputMonitoring: return .listenEvent
         case .automation: return .automation
         case .motion: return .motion
-        }
-    }
-
-    /// セーフティーの機能を ON にしたときに、要求すべき権限の一覧。
-    ///
-    /// #51 のオンボーディングが「要求範囲を ON にした機能に絞る」ために使う。
-    /// このブランチでは #51 がまだ入っていないため最小の対応表だけを持ち、
-    /// 画面の内容は `PermissionKind.allCases` の従来どおりで動く(最終報告に記載)。
-    public static func relevant(for feature: SafetyFeature) -> [PermissionKind] {
-        switch feature {
-        case .macCamera: return [.camera]
-        case .iphonePresence: return []  // USB 接続だけで、TCC の権限は要らない
-        case .iphoneScreenshot: return []  // tunneld の登録(管理者パスワード)が要る
-        case .discordExposure: return []
-        case .sermonTakeover: return [.automation]
-        case .quitLock: return []
-        case .photobomb: return [.screenRecording]
         }
     }
 
@@ -98,10 +96,7 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     /// オートメーションは対象アプリへ実際にイベントを送った瞬間しかプロンプトが出ないため、ここでは要求できない。
     public var requestButtonTitle: String? {
         switch self {
-        case .camera, .microphone: return "許可を求める"
-        case .screenRecording: return "許可を求める"
-        case .inputMonitoring: return "許可を求める"
-        case .motion: return "許可を求める"
+        case .camera, .screenRecording, .motion: return "許可を求める"
         case .automation: return nil
         }
     }
@@ -110,9 +105,7 @@ public enum PermissionKind: String, Sendable, CaseIterable, Identifiable {
     public var consequenceIfDenied: String {
         switch self {
         case .camera: return "居眠りの証拠写真が撮れない"
-        case .microphone: return "音による在席判定が使えない"
         case .screenRecording: return "Mac の画面を晒せない"
-        case .inputMonitoring: return "アイドル判定の精度が落ちる"
         case .automation: return "音楽を止められない(オーバーレイは出る)"
         case .motion: return "首振りで答えられない"
         }

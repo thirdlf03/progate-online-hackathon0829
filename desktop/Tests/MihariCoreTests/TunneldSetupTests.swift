@@ -20,6 +20,15 @@ struct TunneldSetupTests {
         // AppleScript リテラルの中では、引用符は \" に、バックスラッシュは \\ になる。
         #expect(source.contains(#""/we\"ird\\path/scripts/install_tunneld_daemon.sh""#))
     }
+
+    @Test("uninstall も管理者権限で解除スクリプトを実行する")
+    func buildsAdminUninstallScript() {
+        let source = TunneldSetup.uninstallScript(bridgeDirectory: "/repo/bridge")
+        #expect(
+            source
+                == "do shell script \"/repo/bridge/scripts/uninstall_tunneld_daemon.sh\" with administrator privileges"
+        )
+    }
 }
 
 @Suite("tunneld の状態モデル")
@@ -100,5 +109,35 @@ struct TunneldModelTests {
         await model.install()
         #expect(model.status == .notRunning)
         #expect(model.message?.contains("-10004") == true)
+    }
+
+    @Test("解除が成功して応答が無くなれば notRunning になり解除メッセージを出す")
+    func uninstallSuccessBecomesNotRunning() async {
+        let runner = RunnerStub()
+        let model = makeModel(probeResults: [false], runner: runner)
+        await model.uninstall()
+        #expect(model.status == .notRunning)
+        #expect(model.message?.contains("解除した") == true)
+        #expect(runner.sources.first?.contains("uninstall_tunneld_daemon.sh") == true)
+    }
+
+    @Test("解除してもまだ応答があれば running のまま再確認を促す")
+    func uninstallKeepsRunningWhenStillReachable() async {
+        let runner = RunnerStub()
+        let model = makeModel(probeResults: [true], runner: runner)
+        await model.uninstall()
+        #expect(model.status == .running)
+        #expect(model.message?.contains("再確認") == true)
+    }
+
+    @Test("解除のパスワード入力をキャンセルしたら開始前の状態を保ちメッセージを出す")
+    func uninstallCancelKeepsPreviousStatus() async {
+        let runner = RunnerStub()
+        runner.outcome = AppleScriptOutcome(errorNumber: -128)
+        let model = makeModel(probeResults: [], runner: runner)
+        await model.refresh()  // probe の結果で notRunning になる。
+        await model.uninstall()
+        #expect(model.status == .notRunning)
+        #expect(model.message?.contains("キャンセル") == true)
     }
 }

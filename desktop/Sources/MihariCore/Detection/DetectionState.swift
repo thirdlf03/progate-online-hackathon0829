@@ -80,16 +80,28 @@ public enum EvidenceKind: String, Equatable, Sendable {
         }
     }
 
-    /// iPhone の様子から撮る先を決める。
-    public static func forEvidence(iphone: SpeechRequest.IPhoneState) -> EvidenceKind {
+    /// iPhone の様子と、いま ON のセーフティートグルから撮る先を決める。
+    ///
+    /// 対応するトグルが OFF なら撮らずに `.none` にする。例外的に、iPhone を
+    /// 触っているのに「iPhone の画面を撮る」が OFF のときは **Mac のカメラには
+    /// 倒さない**。「見張りたいだけで、勝手にカメラを回されたくない」の合意から。
+    public static func forEvidence(
+        iphone: SpeechRequest.IPhoneState,
+        gate: SafetyGate
+    ) -> EvidenceKind {
         switch iphone {
         case .active:
-            // Mac は放置して iPhone を触っている。何を見ているかを晒す。
-            return .iphoneScreenshot
+            // Mac は放置して iPhone を触っている。トグルが ON のときだけ画面を撮る。
+            return gate.isEnabled(.iphoneScreenshot) ? .iphoneScreenshot : .none
         case .idle, .unreachable:
-            // iPhone からも反応が無い。寝ているか席にいないので、顔を撮る。
-            return .macCamera
+            // iPhone からも反応が無い。トグルが ON のときだけ顔を撮る。
+            return gate.isEnabled(.macCamera) ? .macCamera : .none
         }
+    }
+
+    /// ゲート無しで決める(= 全機能 ON と同じ)。テストの追従を最小にするため残す。
+    public static func forEvidence(iphone: SpeechRequest.IPhoneState) -> EvidenceKind {
+        forEvidence(iphone: iphone, gate: .allowAll)
     }
 }
 

@@ -22,6 +22,11 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     var focusStreakIntervalSeconds: TimeInterval { get }
     /// 検知の閾値が短縮(`DetectionThresholds.fast`)か。デバッグメニューのチェックに使う。
     var isFastThresholds: Bool { get }
+    /// 執行猶予脱出のメニュー項目の状態(#52)。quitLock が ON でロック中のときだけ出す。
+    var escapeMenuState: EscapeMenuState { get }
+
+    /// いまのセーフティーモードの 1 行表示。予約があれば残り時間も載せる。
+    var safetyStatusLine: String { get }
 
     /// 監視を始める。
     func startWatching()
@@ -33,10 +38,10 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     func startBreak()
     /// 休憩を終える。
     func endBreak()
+    /// セーフティー設定の画面を開く。
+    func openSafetySettings()
     /// Discord 設定の画面を開く。
     func openDiscordSettings()
-    /// セーフティーの設定画面を開く。
-    func openSafetySettings()
     /// 権限の確認画面を開く。
     func openPermissions()
     /// 状態パネルの表示を切り替える。
@@ -54,4 +59,20 @@ public protocol PetMenuActions: AnyObject, ObservableObject {
     /// 検知エンジンを実際に次の段へ進める(デバッグ用)。
     /// 見た目だけの再現と違い、**本物の撮影・投稿が走る。**
     func runDetectionStep(_ step: DetectionDebugStep)
+    /// 執行猶予脱出の宣言ダイアログを開く。
+    func openEscapeDialog()
+    /// 執行猶予脱出のカウントダウンを取り消す。
+    func cancelEscape()
+}
+
+/// 執行猶予脱出のメニュー項目に出せる状態。
+public enum EscapeMenuState: Equatable {
+    /// 宣言ダイアログを開ける。
+    case available
+    /// 冷却中。あと `remaining` で使える。
+    case coolingDown(remaining: TimeInterval)
+    /// カウントダウン中。あと `remaining` で終了する。取り消せる。
+    case countingDown(remaining: TimeInterval)
+    /// 出さない(quitLock OFF・ロック外など)。
+    case hidden
 }

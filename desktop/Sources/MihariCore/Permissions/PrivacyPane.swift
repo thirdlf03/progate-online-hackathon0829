@@ -7,10 +7,7 @@ import Foundation
 /// そのための導線としてオンボーディング画面の各行から使う。
 public enum PrivacyPane: String, Sendable, CaseIterable {
     case camera = "Privacy_Camera"
-    case microphone = "Privacy_Microphone"
     case screenCapture = "Privacy_ScreenCapture"
-    /// 入力監視。
-    case listenEvent = "Privacy_ListenEvent"
     case accessibility = "Privacy_Accessibility"
     case automation = "Privacy_Automation"
     case motion = "Privacy_Motion"
