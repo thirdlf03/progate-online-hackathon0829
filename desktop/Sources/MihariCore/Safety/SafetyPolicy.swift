@@ -18,8 +18,6 @@ public enum SafetyChange: Equatable, Sendable {
 
 /// 変更を拒否した理由。
 public enum SafetyRejection: Equatable, Sendable {
-    /// 緩める方向(ON)は監視していないときだけ。
-    case enablingWhileWatching
     /// #5(終了ブロック)は監視中に OFF にできない。
     case quitLockWhileWatching
     /// 前提(requires)のトグルが OFF。
@@ -42,15 +40,22 @@ public enum SafetyDecision: Equatable, Sendable {
 ///
 /// 合意済みのルール(Epic #58「トグルの変更ルール」):
 /// - OFF 方向(安全側)は**常に即時**。例外は `quitLock` を監視中に OFF にできないことだけ
-/// - ON 方向(緩める)は**監視していないときだけ**。`requires` が OFF なら reject
+/// - ON 方向(緩める)も**いつでも即時**。監視中・ロック中でも通す。必要な権限は呼び側が
+///   その場で要求し、次の検知から効く。`requires` が OFF なら reject
 /// - `canChangeLater == false` の間は、ON 方向が即時ではなく **24 時間後の予約**になる。
 ///   「あとで設定を変えられるようにする」を ON に戻す操作も同じく予約になる
+///
+/// 当初は「ON は監視していないときだけ」だったが、ロック中に厳しくできないのは本末転倒
+/// なので撤廃した(2026-09-01)。`isWatching` はいまや `quitLock` の OFF 判定にしか効かない。
 public enum SafetyPolicy {
 
     /// クーリングオフ期間。`canChangeLater == false` の間の ON はここまで発効が延びる。
     public static let coolingOffInterval: TimeInterval = 24 * 60 * 60
 
     /// 変更を受け付けるか決める。
+    ///
+    /// - Parameter isWatching: いま監視中か(ロック中も監視中として渡す)。`quitLock` を
+    ///   OFF にできるかの判定にだけ使う。ON 方向はこの値を見ない。
     public static func decide(
         _ change: SafetyChange,
         current: SafetySettings,
@@ -59,11 +64,11 @@ public enum SafetyPolicy {
     ) -> SafetyDecision {
         switch change {
         case .enable(let feature):
-            return decideEnable(feature, current: current, isWatching: isWatching, now: now)
+            return decideEnable(feature, current: current, now: now)
         case .disable(let feature):
             return decideDisable(feature, current: current, isWatching: isWatching)
         case .enableAll:
-            return decideEnableAll(current: current, isWatching: isWatching, now: now)
+            return decideEnableAll(current: current, now: now)
         case .disableAll:
             return decideDisableAll(current: current, isWatching: isWatching)
         case .setCanChangeLater(let enabled):
@@ -82,10 +87,8 @@ public enum SafetyPolicy {
 
     /// 発効時刻が来た予約を適用する。来ていなければそのまま返す。
     ///
-    /// ここでは**監視中かどうかを見ない**。ON 方向を監視中に禁じているのは「その場の
-    /// 思いつきで演出が変わる」のを防ぐためで、予約は 24 時間の熟慮を経ている。しかも
-    /// 監視は起動と同時に始まってほぼ常時続くので、監視中を理由に見送ると予約が永久に
-    /// 発効しなくなる。
+    /// ここでは**監視中かどうかを見ない**。ON 方向は監視中でも即時に通すので、予約の
+    /// 発効だけ監視中を理由に見送る筋合いがない。
     ///
     /// 適用した結果は必ず `normalized()` を通す(予約に従属だけが入っていた等でも
     /// 不整合が残らないように)。
@@ -104,17 +107,13 @@ public enum SafetyPolicy {
 
     // MARK: - ON 方向
 
+    /// ON はいつでも即時。監視中・ロック中でも通す(厳しくする側を待たせない)。
+    /// 断るのは前提(`requires`)が OFF のときだけ。
     private static func decideEnable(
         _ feature: SafetyFeature,
         current: SafetySettings,
-        isWatching: Bool,
         now: Date
     ) -> SafetyDecision {
-        // 緩める方向は、監視していないときにだけ認める。
-        // 監視中に ON を許すと演出が途中で変わって「設定にない機能」が動き出すため。
-        if isWatching {
-            return .reject(.enablingWhileWatching)
-        }
         // 依存は「いま ON」だけでなく「同じ予約で ON になる予定」も満たしたとみなす。
         // 予約中に iphonePresence → iphoneScreenshot の順で頼めるようにするため。
         if let required = feature.requires, !effectiveEnabled(current).contains(required) {
@@ -130,12 +129,8 @@ public enum SafetyPolicy {
 
     private static func decideEnableAll(
         current: SafetySettings,
-        isWatching: Bool,
         now: Date
     ) -> SafetyDecision {
-        if isWatching {
-            return .reject(.enablingWhileWatching)
-        }
         guard current.canChangeLater else {
             return schedule(
                 enabling: Set(SafetyFeature.allCases),

@@ -22,10 +22,6 @@ struct SafetyModeViewModelTests {
     @Test("拒否の理由が、次にどうすればよいかまで書いた状態行の文言に変換される")
     func rejectionReasonsBecomeStatusMessages() {
         #expect(
-            SafetyModeViewModel.statusMessage(for: .reject(.enablingWhileWatching))
-                == "監視中は ON にできません。監視を止めると ON にできます(右クリック →「監視を止める」)"
-        )
-        #expect(
             SafetyModeViewModel.statusMessage(for: .reject(.dependencyMissing(.iphonePresence)))
                 == "「iPhone を見張る」を先に ON にしてください"
         )
@@ -49,33 +45,30 @@ struct SafetyModeViewModelTests {
         )
     }
 
-    @Test("変更できない理由は、監視中とロックだけの状態を書き分ける")
-    func restrictionNotesSeparateWatchingFromTheLock() throws {
+    @Test("#5 を OFF にできない理由は、解除時刻が取れるならそれを出す")
+    func quitLockRestrictionNotePrefersTheUnlockTime() throws {
         let unlockAt = try makeDate()
 
-        // 監視中なら、止めれば変えられることを言う。
+        // ロック中なら、監視の有無にかかわらず解除時刻を出す。
         #expect(
-            SafetyModeViewModel.cardRestrictionNote(isWatching: true, lockedUntil: nil)
-                == "監視を止めると変更できます"
+            SafetyModeViewModel.quitLockRestrictionNote(isWatching: true, lockedUntil: unlockAt)
+                == "ロック中(14:30 まで): OFF にできません"
         )
         #expect(
-            SafetyModeViewModel.footerRestrictionNote(isWatching: true, lockedUntil: nil)
-                == "監視中: ON にする変更はできません"
+            SafetyModeViewModel.quitLockRestrictionNote(isWatching: false, lockedUntil: unlockAt)
+                == "ロック中(14:30 まで): OFF にできません"
         )
 
-        // 監視は止まっていてロックだけが残っているなら、「監視中」とは言わずに解除時刻を出す。
+        // 解除時刻が取れない(ロックは切れたが監視は続いている)ときだけ「監視中」と書く。
         #expect(
-            SafetyModeViewModel.cardRestrictionNote(isWatching: false, lockedUntil: unlockAt)
-                == "ロック中(14:30 まで): 設定を緩められません"
-        )
-        #expect(
-            SafetyModeViewModel.footerRestrictionNote(isWatching: false, lockedUntil: unlockAt)
-                == "ロック中(14:30 まで): 設定を緩められません"
+            SafetyModeViewModel.quitLockRestrictionNote(isWatching: true, lockedUntil: nil)
+                == "監視中: OFF にできません"
         )
 
         // どちらでもなければ何も出さない。
-        #expect(SafetyModeViewModel.cardRestrictionNote(isWatching: false, lockedUntil: nil) == nil)
-        #expect(SafetyModeViewModel.footerRestrictionNote(isWatching: false, lockedUntil: nil) == nil)
+        #expect(
+            SafetyModeViewModel.quitLockRestrictionNote(isWatching: false, lockedUntil: nil) == nil
+        )
     }
 
     @Test("権限行は、トグルが OFF なら静的な案内、ON なら許可状態を出す")

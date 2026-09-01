@@ -43,17 +43,17 @@ struct SafetySettingsStoreTests {
         #expect(reloaded.isEnabled(.macCamera))
     }
 
-    @Test("監視中の ON 依頼は拒否され、何も保存されない")
-    func enablingWhileWatchingIsRejectedAndNotSaved() {
+    @Test("監視中の ON 依頼も即時に効いて保存される")
+    func enablingWhileWatchingIsAppliedAndSaved() {
         let defaults = makeDefaults()
         let store = SafetySettingsStore(defaults: defaults, environment: [:])
         defer { store.stop() }
 
         let decision = store.request(.enable(.macCamera), isWatching: true)
 
-        #expect(decision == .reject(.enablingWhileWatching))
-        #expect(store.settings == .default)
-        #expect(defaults.data(forKey: SafetySettingsStore.defaultsKey) == nil)
+        #expect(decision == .apply(store.settings, skipped: []))
+        #expect(store.isEnabled(.macCamera))
+        #expect(defaults.data(forKey: SafetySettingsStore.defaultsKey) != nil)
     }
 
     @Test("旧「スクショに写り込む」キーは値を引き継がず削除する")
