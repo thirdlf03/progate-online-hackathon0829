@@ -29,6 +29,23 @@ struct PetMenuEntriesTests {
         return nil
     }
 
+    @Test("先頭はモード行で、その直後に区切り線が来る")
+    func firstEntriesAreTheModeLine() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+
+        let entries = PetMenuEntries.make(actions: actions, presenter: presenter)
+        guard case .item(let title, _, _) = entries.first else {
+            Issue.record("先頭が項目でない")
+            return
+        }
+        #expect(title == actions.safetyStatusLine)
+        guard case .separator = entries[1] else {
+            Issue.record("モード行の直後に区切り線が無い")
+            return
+        }
+    }
+
     @Test("「スクショに写り込む」のチェックは写り込みの入り / 切りを映し、押すと切り替わる")
     func photobombEntryReflectsAndTogglesTheSetting() throws {
         let presenter = makePresenter()
@@ -65,8 +82,8 @@ struct PetMenuEntriesTests {
         let separatorCount = entries.reduce(into: 0) { count, entry in
             if case .separator = entry { count += 1 }
         }
-        // (監視 / 在席 / 休憩)と(Discord / 権限)の区切り 2 本だけになる。
-        #expect(separatorCount == 2)
+        // (モード)と(監視 / 在席 / 休憩)と(Discord / 権限)の区切り 3 本だけになる。
+        #expect(separatorCount == 3)
 
         // 見える設定なら(既定どおり)デバッグサブメニューが最後に付く。
         let visible = StubPetMenuActions()
@@ -76,5 +93,43 @@ struct PetMenuEntriesTests {
             Issue.record("デバッグサブメニューが最後に付いていない")
             return
         }
+    }
+
+    @Test("執行猶予脱出の項目は状態どおりに出る(冷却中は押しても何もしない)")
+    func escapeEntriesReflectTheState() throws {
+        let presenter = makePresenter()
+        let actions = StubPetMenuActions()
+
+        // 使えるとき: 宣言ダイアログを開く。
+        actions.escapeMenuState = .available
+        let open = try #require(
+            findItem("どうしても終了する…", in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        open.action()
+        #expect(actions.escapeDialogOpens == 1)
+
+        // カウントダウン中: 取り消し項目に変わり、残り時間を出す。
+        actions.escapeMenuState = .countingDown(remaining: 2 * 60)
+        let cancel = try #require(
+            findItem("終了を取り消す(あと2 分)", in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        cancel.action()
+        #expect(actions.escapeCancels == 1)
+        #expect(findItem("どうしても終了する…", in: PetMenuEntries.make(actions: actions, presenter: presenter)) == nil)
+
+        // 冷却中: 押せない(何もしない)項目として、理由をタイトルに載せる。
+        actions.escapeMenuState = .coolingDown(remaining: 23 * 3600)
+        let cooling = try #require(
+            findItem("どうしても終了する(あと23 時間 0 分で使えます)", in: PetMenuEntries.make(actions: actions, presenter: presenter))
+        )
+        cooling.action()
+        #expect(actions.escapeDialogOpens == 1)
+        #expect(actions.escapeCancels == 1)
+
+        // ロック外など hidden のときはどちらも出ない。
+        actions.escapeMenuState = .hidden
+        let hidden = PetMenuEntries.make(actions: actions, presenter: presenter)
+        #expect(findItem("どうしても終了する…", in: hidden) == nil)
+        #expect(findItem("終了を取り消す", in: hidden) == nil)
     }
 }

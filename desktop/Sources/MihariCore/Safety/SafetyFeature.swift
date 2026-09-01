@@ -51,7 +51,7 @@ public enum SafetyFeature: String, CaseIterable, Codable, Sendable, Hashable {
         case .discordExposure:
             return "晒し・メンヘラ・逃げたとき・戻ってきたときに Discord へ投稿します。写真や画面を撮る設定が OFF なら文面だけです"
         case .sermonTakeover:
-            return "晒しのとき、再生中の音楽を止めて全画面で説教します。最長 300 秒で必ず解除されます"
+            return "晒しのとき、再生中の音楽を止めて全画面で説教します。既定 90 秒(最長 300 秒)で必ず解除されます"
         case .quitLock:
             return "アプリを起動した瞬間から、決めた時間(既定 4 時間)は終了できなくなります。Mac はスリープしませんが画面は消えます"
         case .photobomb:

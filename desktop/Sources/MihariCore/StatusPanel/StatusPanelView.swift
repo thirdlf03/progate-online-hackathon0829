@@ -13,11 +13,13 @@ struct StatusPanelView: View {
 
     @ObservedObject var engine: DetectionEngine
     @ObservedObject var daemon: DaemonController
+    @ObservedObject var safety: SafetySettingsStore
 
     var body: some View {
-        let snapshot = StatusPanelSnapshot.make(engine: engine, daemon: daemon)
+        let snapshot = StatusPanelSnapshot.make(engine: engine, daemon: daemon, safety: safety)
         VStack(alignment: .leading, spacing: 4) {
             headline(snapshot)
+            row("モード") { Text(snapshot.modeText) }
             row("Mac 無操作") {
                 Text(snapshot.idleText)
                 Text(snapshot.idleBar).foregroundStyle(barColor(snapshot.tone))

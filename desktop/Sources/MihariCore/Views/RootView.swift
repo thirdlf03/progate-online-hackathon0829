@@ -34,7 +34,7 @@ public struct RootView: View {
             // OverlayView は単体で動くようデーモンを自前で立てる。検証用なのでそのまま使う。
             OverlayView()
                 .tabItem { Label("説教", systemImage: "rectangle.inset.filled") }
-            OnboardingView(model: coordinator.permissions)
+            OnboardingView(model: coordinator.permissions, tunneld: coordinator.tunneld)
                 .tabItem { Label("権限", systemImage: "lock.shield") }
             DaemonView(controller: coordinator.daemon)
                 .tabItem { Label("デーモン", systemImage: "gearshape.2") }

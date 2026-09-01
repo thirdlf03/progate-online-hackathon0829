@@ -15,9 +15,11 @@ from device_bridge.daemon.routers import (
     events,
     health,
     iphone_state,
+    safety,
     screenshot,
     voice,
 )
+from device_bridge.daemon.safety import SafetyState
 from device_bridge.discord_bot.bot import DiscordService
 from device_bridge.discord_bot.scheduler import WatchScheduler
 from device_bridge.voice.screen_reader import ScreenReader
@@ -57,6 +59,8 @@ def create_app(config: DaemonConfig) -> FastAPI:
     app.state.voicevox = VoicevoxClient()
     app.state.watch_scheduler = WatchScheduler(app.state.events)
     app.state.discord = DiscordService(scheduler=app.state.watch_scheduler)
+    # セーフティートグル。Swift が POST /safety で送ってくるまで全 OFF(全て拒否)。
+    app.state.safety = SafetyState()
 
     app.include_router(health.router)
     app.include_router(devices.router)
@@ -65,4 +69,5 @@ def create_app(config: DaemonConfig) -> FastAPI:
     app.include_router(discord.router)
     app.include_router(iphone_state.router)
     app.include_router(screenshot.router)
+    app.include_router(safety.router)
     return app

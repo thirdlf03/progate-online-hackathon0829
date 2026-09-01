@@ -204,14 +204,13 @@ def test_status_reports_what_is_missing(client: TestClient, auth: dict[str, str]
 
     body = client.get("/voice/status", headers=auth).json()
 
-    # llm_configured / llm_model は macOS アプリが必須としてデコードするので、
-    # 形だけ残して無効にする(Claude 経路はもう無い)。
-    assert body["llm_configured"] is False
-    assert body["llm_model"] == ""
     assert body["screen_llm_configured"] is True
     assert body["screen_llm_model"] == "test-screen-model"
     assert body["voicevox_reachable"] is False
     assert body["voicevox_url"] == "http://engine"
+    # Claude 経路のキーは macOS アプリのデコードも既に任意なので、もう送らない。
+    assert "llm_configured" not in body
+    assert "llm_model" not in body
 
 
 def test_voice_endpoints_need_a_token(client: TestClient) -> None:
@@ -539,3 +538,55 @@ def test_screen_rejects_a_broken_screenshot(client: TestClient, auth: dict[str, 
     )
 
     assert response.status_code == 422
+
+
+# ---- セーフティー(既定の全 OFF)での拒否と、OFF でも通る操作 ----------------
+
+
+def test_screen_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    # 画面を読むこと自体が「撮る」の一部なので、スクショ無しでも 403。
+    response = safe_client.post("/voice/screen", json={"idle_seconds": 300}, headers=auth)
+
+    assert response.status_code == 403
+    assert "iPhone の画面を撮る" in response.json()["detail"]
+
+
+def test_line_with_a_screenshot_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    # スクショを送ってきたのに OFF なら、黙って捨てず 403 で返す。
+    response = safe_client.post(
+        "/voice/line",
+        json={"idle_seconds": 300, "screenshot_png": PNG_B64},
+        headers=auth,
+    )
+
+    assert response.status_code == 403
+
+
+def test_speak_with_a_screenshot_is_rejected_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str]
+) -> None:
+    response = safe_client.post(
+        "/voice/speak",
+        json={"idle_seconds": 300, "screenshot_png": PNG_B64},
+        headers=auth,
+    )
+
+    assert response.status_code == 403
+
+
+def test_line_without_a_screenshot_passes_while_safety_is_off(
+    safe_client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # スクショを含まない /voice/line は「撮る」機能を使わないので通す。
+    monkeypatch.setattr(voice_router, "fallback_line", _fixed_fallback)
+    _install(safe_client, _StubVoicevox())
+
+    response = safe_client.post("/voice/line", json={"idle_seconds": 300}, headers=auth)
+
+    assert response.status_code == 200
+    assert response.json()["text"] == _FIXED_LINE
+    assert response.json()["fallback_reason"] == "固定文言(スクショ無し)"

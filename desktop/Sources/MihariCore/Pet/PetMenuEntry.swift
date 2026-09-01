@@ -24,6 +24,12 @@ public enum PetMenuEntries {
     ) -> [PetMenuEntry] {
         let pet = presenter.controller
         var entries: [PetMenuEntry] = [
+            // 最上段はセーフティーモードの表示。押すと設定画面(中身は #54)へ。
+            .item(
+                title: actions.safetyStatusLine,
+                action: { actions.openSafetySettings() }
+            ),
+            .separator,
             .item(
                 title: actions.isWatching ? "監視を止める" : "監視を再開する",
                 action: {
@@ -49,6 +55,10 @@ public enum PetMenuEntries {
                 }
             ),
             .separator,
+            .item(
+                title: "設定…",
+                action: { actions.openSafetySettings() }
+            ),
             .item(
                 title: "Discord 設定…",
                 action: { actions.openDiscordSettings() }
@@ -84,6 +94,30 @@ public enum PetMenuEntries {
                 action: { actions.setPhotobombEnabled(!actions.isPhotobombEnabled) }
             ),
         ]
+        // 執行猶予脱出は quitLock が ON でロック中のときだけ出す(#52)。
+        switch actions.escapeMenuState {
+        case .available:
+            entries.append(
+                .item(title: "どうしても終了する…", action: { actions.openEscapeDialog() })
+            )
+        case .coolingDown(let remaining):
+            // 冷却中は押しても何もしない。理由はタイトルに載せて伝える。
+            entries.append(
+                .item(
+                    title: "どうしても終了する(あと\(EscapePolicy.durationDescription(remaining))で使えます)",
+                    action: {}
+                )
+            )
+        case .countingDown(let remaining):
+            entries.append(
+                .item(
+                    title: "終了を取り消す(あと\(EscapePolicy.durationDescription(remaining)))",
+                    action: { actions.cancelEscape() }
+                )
+            )
+        case .hidden:
+            break
+        }
         // デバッグメニューは開発中だけ出す。一般ユーザーの右クリックから消すのと同時に、
         // その直前の区切り線も消して「実在しない見た目の項目」を残さない。
         if actions.isDebugMenuVisible {

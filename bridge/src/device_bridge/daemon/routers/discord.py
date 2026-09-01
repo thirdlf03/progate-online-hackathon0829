@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from device_bridge.daemon.auth import verify_token
+from device_bridge.daemon.safety import require_feature
 from device_bridge.discord_bot.bot import DiscordUnavailableError
 from device_bridge.discord_bot.invite import invite_url
 from device_bridge.discord_bot.schedule import InvalidTimeError, parse_time_of_day
@@ -99,7 +100,12 @@ async def post_test(request: Request) -> dict[str, Any]:
     return {"posted": True, "message_id": message_id}
 
 
-@router.post("/post")
+@router.post(
+    "/post",
+    # 証拠を投稿して「晒す」ことはセーフティーの対象。テスト送信やチャンネル選択は
+    # 本人の明示操作なので対象外(ここではなく、そちらのエンドポイントには付けない)。
+    dependencies=[Depends(require_feature("discord_exposure"))],
+)
 async def post_evidence(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     """証拠を投稿する。画像は base64 で受け取る。
 

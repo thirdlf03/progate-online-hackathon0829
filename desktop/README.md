@@ -7,7 +7,7 @@
 
 ## なぜ `swift run` ではなく `.app` を作るのか
 
-TCC（カメラ / マイク / 画面収録 / 入力監視 / モーション）のプロンプトを正しく出すには、
+TCC（カメラ / 画面収録 / オートメーション / モーション）のプロンプトを正しく出すには、
 用途文字列を持つ `Info.plist` 入りの**署名済み `.app` バンドル**である必要がある。
 `swift build` の生成物をそのまま実行してもプロンプトは出ず、権限は黙って失敗する。
 `build.sh` はビルド生成物を `Mihari.app` に組み立て、`Resources/Mihari.entitlements` を付けて署名する
@@ -46,22 +46,20 @@ swift test
 | 権限 | 用途 | 照会 API |
 | --- | --- | --- |
 | カメラ | サボり検知時に証拠写真を1枚撮る | `AVCaptureDevice.authorizationStatus(for: .video)` |
-| マイク | 在席状況の判定に使う（音声は保存しない） | `AVCaptureDevice.authorizationStatus(for: .audio)` |
-| 画面収録 | サボり検知時に画面のスクショを撮る | `CGPreflightScreenCaptureAccess()` |
-| 入力監視 | キーやマウスの操作有無からアイドルを判定する | `IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)` |
+| 画面収録 | デバッグ画面から Mac のスクリーンショットを撮るときだけ使う | `CGPreflightScreenCaptureAccess()` |
 | オートメーション | 説教中に再生中の音楽を止める | `AEDeterminePermissionToAutomateTarget(com.apple.Music)` |
 | モーション | AirPods の首振りを はい/いいえ として受け取る | `CMHeadphoneMotionManager.authorizationStatus()` |
 
-カメラ / マイク / 画面収録 / 入力監視の 4 つは**必須**で、揃うまで見張り始めない。
-撮れも送れもしない状態で常駐しても、黙って失敗し続けるだけになるため。
-オートメーションとモーションは任意で、欠けていても始められる。
+**必須になる権限は ON にしたセーフティートグルから決まる**(全 OFF なら何も要求しない)。カメラは
+「Mac のカメラで撮る」が ON のときだけ必須。オートメーションとモーションは任意で、欠けていても
+始められる。画面収録はトグルと紐づかず、**デバッグの Mac スクショを撮るときだけ**使う。
 
-初回、または必須のどれかが欠けているときだけ「権限の確認」ウィンドウが出る。初回起動時は
-要求できる権限（カメラ / マイク / 画面収録 / 入力監視）をまとめてプロンプトし、2 回目以降は
-勝手に出さず「まとめて許可を求める」ボタンを押したときだけ要求する。必須が揃うと「始める」が
-押せるようになり、押すとウィンドウが閉じてペットが出て、デーモンが起動し、見張りが始まる。
-2 回目以降で必須が揃っていれば、ウィンドウを出さずに起動と同時に見張り始める。
-画面収録だけは、システム設定で許可したあとにアプリを再起動しないと反映されない。
+初回起動時(既存インストールのアップデート後も初回 1 回)に、オンボーディングが**モードを選ぶ →
+必要な権限だけ要求 → 始める**の 2 ステップで 1 度だけ出る。全部 OFF(= セーフティー)なら権限は
+1 つも要求しないので、権限画面は飛ばして即座に見張りを始める。モード選択を済ませると記録され、
+2 回目以降は出さない。以降は、必須権限が欠けているときだけ「権限の確認」ウィンドウが出て、
+揃うと「始める」が押せる。画面収録だけは、システム設定で許可したあとにアプリを再起動しないと
+反映されない。
 
 ### 開発中にハマりやすい点
 
@@ -198,8 +196,10 @@ desktop/
 │       ├── Voice/            # SpeechPlayer（唯一の音の出口）と VoiceController
 │       ├── Daemon/           # Python 常駐プロセスの起動・REST・SSE
 │       ├── Discord/          # 証拠の投稿とチャンネル選択
+│       ├── Escape/           # quitLock 中の執行猶予脱出（宣言・待ち時間・自動復帰）
 │       ├── Attendance/       # 在席スタンプ（Touch ID）
 │       ├── HeadGesture/      # AirPods の首振り
+│       ├── Safety/           # 機能トグル 7 本の設定・変更ポリシー・実行ゲート
 │       ├── Permissions/
 │       ├── Pet/              # 連携イベント・protocol と、スプライトのペット本体
 │       ├── Resources/pets/   # 同梱ペットの素材（pet.json + スプライトシート）
@@ -222,14 +222,14 @@ desktop/
    （同名の証明書が複数あっても一意に決まるよう、名前ではなく SHA-1 ハッシュを渡している）
 3. どちらも無ければ従来どおり **ad-hoc**（`codesign --sign -`）で署名し、stderr に警告を 1 行出す
 
-Hardened Runtime（`--options runtime`）は付けていない。付けるとカメラ / マイクに
+Hardened Runtime（`--options runtime`）は付けていない。付けるとカメラなどのデバイス権限に
 `com.apple.security.device.*` の entitlements が別途必要になるため。
 
 ### なぜ証明書で署名したいのか
 
 TCC はアプリの同一性を、証明書署名なら **Team ID を含む designated requirement** で、
 ad-hoc なら **cdhash** で照合する。cdhash はコードが変われば変わるので、**ad-hoc だと再ビルドの
-たびに別のアプリと見なされ、一度許可したカメラ / マイク / 入力監視が無効になる。**
+たびに別のアプリと見なされ、一度許可したカメラなどの権限が無効になる。**
 システム設定の一覧では ON のままなのに実際のチェックだけが拒否される、という分かりにくい壊れ方をする。
 `build.sh` の最後に出る `designated => ...` の行が、いまどちらで照合されているかを示している。
 
@@ -280,7 +280,7 @@ make run   # 「権限の確認」ウィンドウが出るので、まとめて�
 ```
 Swift ──POST /voice/speak（状況・iPhone 操作中ならスクショ）──▶ Python
                                     ├ スクショあり → Gemini が画面を読んでセリフ
-                                    ├ それ以外・読めなかった → Claude API でセリフ生成
+                                    ├ それ以外・読めなかった → 固定文言
                                     └ VOICEVOX で WAV 合成
       ◀── {text, screen, audio(base64), ...} ─┘
 ```
@@ -295,20 +295,16 @@ Mac のカメラ写真は顔しか写らないので送らない。手で試す�
 
 | 欠けているもの | どうなるか |
 | --- | --- |
-| `ANTHROPIC_API_KEY` 未設定 | 状況別の固定文言で喋る（`from_llm: false`） |
-| Claude API が遅い / 失敗 | 待たずに固定文言へ切り替える（既定 4 秒で打ち切り） |
-| `GEMINI_API_KEY` 未設定 | 画面は読まず、従来どおり Claude のセリフになる |
-| Gemini が遅い / 失敗 | Claude → 固定文言の順に落ちる（既定 6 秒で打ち切り） |
+| `GEMINI_API_KEY` 未設定（スクショあり） | スクショは読まず、状況別の固定文言で喋る（`from_llm: false`） |
+| Gemini が遅い / 失敗 | 待たずに固定文言へ切り替える（既定 6 秒で打ち切り） |
 | VOICEVOX が未起動 | 音声は `null`。セリフは返るので吹き出しには出る |
 
 ### セットアップ
 
 1. [VOICEVOX](https://voicevox.hiroshiba.jp/) をインストールして起動する（既定 `http://127.0.0.1:50021`）
-2. `cp bridge/.env.example bridge/.env` して `ANTHROPIC_API_KEY` を入れる
-3. iPhone の画面まで読ませるなら、同じ `.env` に `GEMINI_API_KEY` を入れる
+2. iPhone の画面まで読ませるなら `cp bridge/.env.example bridge/.env` して `GEMINI_API_KEY` を入れる
 
-どれも任意。入れなくてもアプリは動く（`GEMINI_API_KEY` が無ければ画面は読まず、従来どおり
-Claude / 固定文言になる）。「セリフと声」タブに、いま何が足りないかが出る。
+どれも任意。入れなくてもアプリは動く（`GEMINI_API_KEY` が無ければ画面は読まず、固定文言になる）。「セリフと声」タブに、いま何が足りないかが出る。
 
 画面を読ませると 1 回およそ $0.0003（画像は medium で 560 トークン固定 + 短い JSON。
 [料金](https://ai.google.dev/gemini-api/docs/pricing)）。スクショは Gemini API に送られる。
@@ -317,8 +313,6 @@ Claude / 固定文言になる）。「セリフと声」タブに、いま何�
 
 | 変数 | 既定 | 用途 |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | なし | セリフ生成。未設定なら固定文言 |
-| `MIHARI_LLM_MODEL` | `claude-haiku-4-5` | 喋り出しの速さを優先した既定。品質重視なら `claude-opus-5` |
 | `GEMINI_API_KEY` | なし | iPhone のスクショを読む。`GOOGLE_API_KEY` でも可。未設定なら画面を読まない |
 | `MIHARI_SCREEN_MODEL` | `gemini-3.1-flash-lite` | 画面を読むモデル。ここも喋り出しの速さ優先 |
 | `MIHARI_SCREEN_MEDIA_RESOLUTION` | `medium` | スクショを送る解像度（`low` / `medium` / `high`）。上げるのは読み違いが多いときだけ |
@@ -348,9 +342,9 @@ Claude / 固定文言になる）。「セリフと声」タブに、いま何�
 
 ### キャラの口調を変える
 
-Claude と Gemini に共通の「守ること」は `bridge/src/device_bridge/voice/persona.py` の `PERSONA_RULES`。
-Claude 向けの前置きは `voice/generator.py` の `SYSTEM_PROMPT`、スクショを見るときの指示は
-`voice/screen_reader.py` の `SYSTEM_PROMPT`。固定文言は `voice/fallback.py`。
+ペットの人格「守ること」は `bridge/src/device_bridge/voice/persona.py` の `PERSONA_RULES` 1 箇所。
+スクショを見てセリフを作る指示は `voice/screen_reader.py` の `SYSTEM_PROMPT`。固定文言は
+`voice/fallback.py`。
 
 ## Discord
 

@@ -125,6 +125,20 @@ struct DiscordMessageTests {
         }
     }
 
+    @Test("証拠を撮らない設定なら、1 行目は noEvidencePool から選ばれる")
+    func noEvidenceHeadlineComesFromItsOwnPool() {
+        let pool = [
+            "写真も画面も撮らない設定にしてるんだね。でも、サボってたのは分かってる。",
+            "撮らないでって頼まれたから撮らないよ。その代わり、ずっと待ってたことはみんなに言うね。",
+            "証拠は残さない約束にしてるんだった。それでも、私が数えてた時間は消えないよ。",
+            "カメラもスマホも使わないでいても、気づかないと思った?手が止まってたんだよ。",
+        ]
+        for seed in UInt64(0)..<16 {
+            let message = compose(facts(evidence: .none, iphone: .unreachable), seed: seed)
+            #expect(pool.contains { message.contains($0) })
+        }
+    }
+
     @Test("2 行目には、当てはまる事実だけを並べる")
     func subtextListsOnlyWhatApplies() {
         let message = compose(
@@ -192,5 +206,34 @@ struct DiscordMessageTests {
             )
             #expect(!message.contains("<@"))
         }
+    }
+
+    // MARK: - 執行猶予脱出 (#52)
+
+    @Test("逃げた投稿は 逃げたプール + 戻ると宣言の副文になる")
+    func escapedMessageHasReturnDeclaration() {
+        var generator = SeededGenerator(seed: 7)
+        let now = Date(timeIntervalSince1970: 0)
+
+        let message = DiscordMessageComposer.escaped(
+            returnAt: now.addingTimeInterval(90 * 60),
+            now: now,
+            using: &generator
+        )
+
+        // 2 行目は小文字表示で、「N 時間 M 分後(HH:mm)に戻ると宣言」を添える。
+        let lines = message.components(separatedBy: "\n")
+        #expect(lines.count == 2)
+        #expect(lines[1].hasPrefix("-# "))
+        #expect(message.contains("分後("))
+        #expect(message.hasSuffix("に戻ると宣言。"))
+    }
+
+    @Test("戻ってきた投稿と戻っていなかった投稿はそれぞれ文面になる")
+    func returnMessagesAreSentences() {
+        #expect(DiscordMessageComposer.returned().hasSuffix("。"))
+        #expect(DiscordMessageComposer.didNotReturn().hasSuffix("。"))
+        // 意味が逆なので、同じ文面にはならない。
+        #expect(DiscordMessageComposer.returned() != DiscordMessageComposer.didNotReturn())
     }
 }

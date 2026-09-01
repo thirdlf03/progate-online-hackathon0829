@@ -55,9 +55,6 @@ public struct VoiceView: View {
                 Label(status.summary, systemImage: statusIcon(status))
                     .font(.callout)
                     .foregroundStyle(statusColor(status))
-                Text("モデル: \(status.llmModel) / VOICEVOX: \(status.voicevoxURL) (話者 \(status.voicevoxSpeaker))")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
                 Text(screenLLMLine(status))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
@@ -245,10 +242,11 @@ public struct VoiceView: View {
     }
 
     private func statusIcon(_ status: VoiceStatus) -> String {
-        status.llmConfigured && status.voicevoxReachable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+        status.screenLLMConfigured && status.voicevoxReachable
+            ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
     }
 
     private func statusColor(_ status: VoiceStatus) -> Color {
-        status.llmConfigured && status.voicevoxReachable ? .green : .orange
+        status.screenLLMConfigured && status.voicevoxReachable ? .green : .orange
     }
 }

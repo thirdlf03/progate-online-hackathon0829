@@ -19,6 +19,7 @@ from starlette.background import BackgroundTask
 
 from device_bridge.commands import screenshot, screenshot_source
 from device_bridge.daemon.auth import verify_token
+from device_bridge.daemon.safety import require_feature
 
 router = APIRouter(prefix="/iphone", tags=["iphone"], dependencies=[Depends(verify_token)])
 
@@ -34,7 +35,11 @@ async def get_preflight() -> dict[str, Any]:
     return result.to_payload()
 
 
-@router.post("/screenshot")
+@router.post(
+    "/screenshot",
+    # 撮影そのものはセーフティーの「画面を撮る」に掛かる。preflight は道具の確認なので掛けない。
+    dependencies=[Depends(require_feature("iphone_screenshot"))],
+)
 async def post_screenshot() -> FileResponse:
     """スクリーンショットを撮り、PNG を返す。"""
     source = screenshot_source.LiveScreenshotSource()

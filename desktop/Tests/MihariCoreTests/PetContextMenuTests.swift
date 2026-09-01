@@ -65,6 +65,23 @@ struct PetContextMenuTests {
         #expect(menu.items[1].isSeparatorItem)
     }
 
+    @Test("「設定…」は Discord 設定の直前に並ぶ")
+    func settingsItemSitsRightBeforeDiscordSettings() throws {
+        // 実機の表示設定をテスト同士で共有しないよう、実行のたびに空の UserDefaults を使う。
+        let suiteName = "mihari.test.petContextMenu.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let presenter = LivePetPresenter(controller: PetController(defaults: defaults))
+        let actions = StubPetMenuActions()
+
+        let menu = PetContextMenu.makeMenu(
+            PetMenuEntries.make(actions: actions, presenter: presenter)
+        )
+        let titles = menu.items.map(\.title)
+        let discordIndex = try #require(titles.firstIndex(of: "Discord 設定…"))
+
+        #expect(titles[discordIndex - 1] == "設定…")
+    }
+
     @Test("自動での有効・無効判定に任せず、項目は押せるままにする")
     func itemsStayEnabled() {
         // キーウィンドウにならないパネルから出すので、AppKit に任せると項目が灰色になる。
@@ -77,5 +94,20 @@ struct PetContextMenuTests {
         #expect(menu.items.allSatisfy { $0.isEnabled })
         #expect(menu.items[1].submenu?.autoenablesItems == false)
         #expect(menu.items[1].submenu?.items.allSatisfy { $0.isEnabled } == true)
+    }
+
+    @Test("右クリックメニューの先頭はモード行になる")
+    func firstEntryIsTheModeLine() throws {
+        _ = NSApplication.shared
+        let actions = StubPetMenuActions()
+        let suiteName = "mihari.test.contextMenu.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let presenter = LivePetPresenter(controller: PetController(defaults: defaults))
+
+        let menu = PetContextMenu.makeMenu(PetMenuEntries.make(actions: actions, presenter: presenter))
+
+        #expect(menu.items.first?.title == actions.safetyStatusLine)
+        #expect(menu.items[1].isSeparatorItem)
     }
 }

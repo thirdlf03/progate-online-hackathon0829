@@ -23,7 +23,8 @@ struct StatusPanelSnapshotTests {
         breakUntil: Date? = nil,
         lastEvidenceAt: Date? = nil,
         lastLog: DetectionLogEntry? = nil,
-        daemonPort: Int? = nil
+        daemonPort: Int? = nil,
+        settings: SafetySettings = .default
     ) -> StatusPanelSnapshot {
         StatusPanelSnapshot.make(
             isWatching: isWatching,
@@ -35,6 +36,7 @@ struct StatusPanelSnapshotTests {
             lastEvidenceAt: lastEvidenceAt,
             lastLog: lastLog,
             daemonPort: daemonPort,
+            settings: settings,
             now: now
         )
     }
@@ -151,11 +153,64 @@ struct StatusPanelSnapshotTests {
         #expect(snapshot().daemonText == "未接続")
     }
 
+    // MARK: - セーフティーモード
+
+    @Test("モードは設定のまま出す。予約があれば残り時間を足す")
+    func modeTextFollowsTheSettings() {
+        #expect(snapshot().modeText == "セーフティー")
+
+        var custom = SafetySettings()
+        custom.enabled = [.macCamera, .discordExposure, .photobomb]
+        #expect(snapshot(settings: custom).modeText == "カスタム(3/7)")
+
+        var unlimited = SafetySettings()
+        unlimited.enabled = Set(SafetyFeature.allCases)
+        #expect(snapshot(settings: unlimited).modeText == "無制限")
+    }
+
+    @Test("予約があれば、モードに残り時間を添える")
+    func modeTextAddsThePendingChange() {
+        var reserved = SafetySettings()
+        reserved.enabled = [.macCamera, .discordExposure, .photobomb]
+        reserved.pendingChange = SafetyPendingChange(
+            disabling: [.discordExposure],
+            restoresChangeability: false,
+            effectiveAt: now.addingTimeInterval(21 * 3600)
+        )
+        #expect(snapshot(settings: reserved).modeText == "カスタム(3/7)・変更予約 あと 21 時間")
+
+        reserved.pendingChange = SafetyPendingChange(
+            disabling: [.discordExposure],
+            restoresChangeability: false,
+            effectiveAt: now.addingTimeInterval(3 * 3600 + 25 * 60)
+        )
+        #expect(snapshot(settings: reserved).modeText == "カスタム(3/7)・変更予約 あと 3 時間 25 分")
+    }
+
+    @Test("iPhone を見張っていなければ、iPhone の行は「見ていない」")
+    func iphoneRowSaysNotWatchingWhenDisabled() {
+        let signals = DetectionSignals(macIdleSeconds: 200, iphone: .active)
+        var off = SafetySettings()
+        off.enabled = [.discordExposure]
+        #expect(off.isEnabled(.iphonePresence) == false)
+        let shown = snapshot(signals: signals, settings: off)
+        #expect(shown.iphoneWatched == false)
+        #expect(shown.iphoneText == "見ていない")
+
+        var on = SafetySettings()
+        on.enabled = [.iphonePresence, .discordExposure]
+        #expect(snapshot(signals: signals, settings: on).iphoneWatched == true)
+        #expect(snapshot(signals: signals, settings: on).iphoneText == "操作中")
+    }
+
     // MARK: - まだ評価していない
 
     @Test("まだ評価していなければ材料の行は全部「—」")
     func unevaluatedRowsArePlaceholders() {
-        let blank = snapshot(signals: nil)
+        // iPhone の行のプレースホルダは、見張る設定のときだけ出す。
+        var watching = SafetySettings()
+        watching.enabled = [.iphonePresence]
+        let blank = snapshot(signals: nil, settings: watching)
         #expect(blank.idleText == "—")
         #expect(blank.idleProgress == 0)
         #expect(blank.idleBar == "░░░░░░░░░░")
@@ -174,21 +229,29 @@ struct StatusPanelSnapshotTests {
 
     @Test("iPhone・音楽・前面アプリは材料そのままの言い方で出す")
     func signalsUseExistingLabels() {
+        var watching = SafetySettings()
+        watching.enabled = [.iphonePresence]
         let signals = DetectionSignals(
             macIdleSeconds: 200,
             iphone: .active,
             music: .playing(.spotify),
             frontmostApp: "Safari"
         )
-        let shown = snapshot(signals: signals)
+        let shown = snapshot(signals: signals, settings: watching)
         #expect(shown.iphoneText == "操作中")
         #expect(shown.musicText == NowPlaying.playing(.spotify).label)
         #expect(shown.frontmostAppText == "Safari")
 
-        #expect(snapshot(signals: DetectionSignals(macIdleSeconds: 200, iphone: .idle)).iphoneText == "置かれたまま")
         #expect(
-            snapshot(signals: DetectionSignals(macIdleSeconds: 200, iphone: .unreachable)).iphoneText == "応答なし"
+            snapshot(signals: DetectionSignals(macIdleSeconds: 200, iphone: .idle), settings: watching).iphoneText
+                == "置かれたまま"
         )
-        #expect(snapshot(signals: DetectionSignals(macIdleSeconds: 200)).frontmostAppText == "不明")
+        #expect(
+            snapshot(
+                signals: DetectionSignals(macIdleSeconds: 200, iphone: .unreachable),
+                settings: watching
+            ).iphoneText == "応答なし"
+        )
+        #expect(snapshot(signals: DetectionSignals(macIdleSeconds: 200), settings: watching).frontmostAppText == "不明")
     }
 }

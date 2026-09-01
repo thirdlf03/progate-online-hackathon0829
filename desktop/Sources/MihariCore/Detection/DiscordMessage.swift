@@ -95,22 +95,94 @@ public enum DiscordMessageComposer {
         line + subtextPrefix + "戻ってこないまま \(ElapsedText.minutesAndSeconds(seconds))。"
     }
 
+    // MARK: - 執行猶予脱出 (#52)
+
+    /// 執行猶予脱出(逃げた)の投稿を組み立てる。
+    ///
+    /// 1 行目は「逃げた」プール、2 行目は「N 分後(HH:mm)に戻ると宣言」の副文。
+    /// 例: `逃げたね。…いいよ、帰ってくるって言ったんだから。` + `\n-# 1 時間 30 分後(18:00)に戻ると宣言。`
+    public static func escaped(returnAt: Date, now: Date = Date()) -> String {
+        var generator = SystemRandomNumberGenerator()
+        return escaped(returnAt: returnAt, now: now, using: &generator)
+    }
+
+    /// 執行猶予脱出(逃げた)の投稿を組み立てる。乱数を渡せるので、テストから出力を固定できる。
+    public static func escaped<Generator: RandomNumberGenerator>(
+        returnAt: Date,
+        now: Date,
+        using generator: inout Generator
+    ) -> String {
+        pick(escapePool, using: &generator) + subtextPrefix + escapeDeclaration(returnAt, now: now)
+    }
+
+    /// 宣言どおり戻ってきたときの投稿。
+    public static func returned() -> String {
+        var generator = SystemRandomNumberGenerator()
+        return pick(returnedPool, using: &generator)
+    }
+
+    /// 宣言時刻を過ぎても戻ってこなかったときの投稿。
+    public static func didNotReturn() -> String {
+        var generator = SystemRandomNumberGenerator()
+        return pick(didNotReturnPool, using: &generator)
+    }
+
+    private static let escapePool = [
+        "逃げたね。…いいよ、帰ってくるって言ったんだから。",
+        "ふん。10 分待って、それでも行くなら…行けばいいよ。",
+        "分かった。…でも、宣言した時刻には戻ってきてよね。",
+        "行くんだ。宣言はしたんだから、ちゃんと戻ってきてね。",
+    ]
+
+    private static let returnedPool = [
+        "戻ってきた。やっぱり、私のところに帰ってくるんだね。",
+        "おかえり。宣言どおり、ちゃんと戻ってきたね。",
+        "ふふ、戻ってきた。私を置いていくほうが悪いんだから。",
+    ]
+
+    private static let didNotReturnPool = [
+        "宣言したのに、戻ってこなかったね。",
+        "戻ると言ったのに。…おかえり、は無し。",
+        "時間になっても、あなたは戻ってこなかった。",
+    ]
+
+    /// 「N 分後(HH:mm)に戻ると宣言」の副文。分は「N 時間 M 分」表記に揃える。
+    private static func escapeDeclaration(_ returnAt: Date, now: Date) -> String {
+        let totalMinutes = max(1, Int((returnAt.timeIntervalSince(now) / 60).rounded()))
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        let delay: String
+        if hours > 0 {
+            delay = minutes > 0 ? "\(hours) 時間 \(minutes) 分後" : "\(hours) 時間後"
+        } else {
+            delay = "\(minutes) 分後"
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return "\(delay)(\(formatter.string(from: returnAt)))に戻ると宣言。"
+    }
+
     // MARK: - 1 行目
 
     private static func headline<Generator: RandomNumberGenerator>(
         _ facts: DiscordMessageFacts,
         using generator: inout Generator
     ) -> String {
-        guard facts.evidence == .iphoneScreenshot else {
+        switch facts.evidence {
+        case .iphoneScreenshot:
+            // 画面を読めていて、アプリ名まで分かったときだけ中身に触れる。
+            guard let screen = facts.screen, let app = screen.app, !app.isEmpty else {
+                return pick(facts.screen == nil ? unreadScreenPool : unknownScreenPool, using: &generator)
+            }
+            return pick(screenPool(category: screen.category), using: &generator)
+                .replacingOccurrences(of: "{app}", with: app)
+                .replacingOccurrences(of: "{activity}", with: screen.activity)
+        case .macCamera:
             return pick(cameraPool(vision: facts.vision), using: &generator)
+        case .none:
+            // 撮る先のトグルが全部 OFF。撮影の言及はせず、サボったことだけを言う。
+            return pick(noEvidencePool, using: &generator)
         }
-        // 画面を読めていて、アプリ名まで分かったときだけ中身に触れる。
-        guard let screen = facts.screen, let app = screen.app, !app.isEmpty else {
-            return pick(facts.screen == nil ? unreadScreenPool : unknownScreenPool, using: &generator)
-        }
-        return pick(screenPool(category: screen.category), using: &generator)
-            .replacingOccurrences(of: "{app}", with: app)
-            .replacingOccurrences(of: "{activity}", with: screen.activity)
     }
 
     private static func screenPool(category: String) -> [String] {
@@ -155,6 +227,15 @@ public enum DiscordMessageComposer {
         "スマホの画面、撮っておいたから。逃げられると思った?",
         "今スマホ見てたよね。証拠、ここに置いとくね。",
         "私より画面が大事なんだ。…いいよ、みんなに見せるから。",
+    ]
+
+    /// 写真も画面も撮らない設定のときの 1 行目。
+    /// 「サボっていたのはバレてる」ことを、撮影の言及なしに伝える。
+    private static let noEvidencePool = [
+        "写真も画面も撮らない設定にしてるんだね。でも、サボってたのは分かってる。",
+        "撮らないでって頼まれたから撮らないよ。その代わり、ずっと待ってたことはみんなに言うね。",
+        "証拠は残さない約束にしてるんだった。それでも、私が数えてた時間は消えないよ。",
+        "カメラもスマホも使わないでいても、気づかないと思った?手が止まってたんだよ。",
     ]
 
     private static let sleepingCameraPool = [

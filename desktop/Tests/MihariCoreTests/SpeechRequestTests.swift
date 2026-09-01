@@ -150,28 +150,31 @@ struct SpokenLineTests {
 @Suite("セリフと声の使用可否")
 struct VoiceStatusTests {
 
-    private func status(llm: Bool, voicevox: Bool) -> VoiceStatus {
+    private func status(screen: Bool, voicevox: Bool) -> VoiceStatus {
         VoiceStatus(
-            llmConfigured: llm,
-            llmModel: "claude-haiku-4-5",
+            llmConfigured: false,
+            llmModel: "",
             voicevoxURL: "http://127.0.0.1:50021",
             voicevoxSpeaker: 1,
             voicevoxReachable: voicevox,
-            cachedAudio: 0
+            cachedAudio: 0,
+            screenLLMConfigured: screen,
+            screenLLMModel: "gemini-3.1-flash-lite"
         )
     }
 
     @Test("両方揃っていれば使えると出す")
     func bothReady() {
-        #expect(status(llm: true, voicevox: true).summary == "セリフも声も使える")
+        #expect(status(screen: true, voicevox: true).summary == "セリフも声も使える")
     }
 
     @Test("欠けている方を名指しする")
     func namesWhatIsMissing() {
         // 「なぜ喋らないのか」が分からないと直しようがないので、原因を文面に出す。
-        #expect(status(llm: false, voicevox: true).summary.contains("ANTHROPIC_API_KEY"))
-        #expect(status(llm: true, voicevox: false).summary.contains("VOICEVOX"))
-        let neither = status(llm: false, voicevox: false).summary
+        // Claude は廃止したので、画面読み取り(Gemini)と音声(VOICEVOX)の 2 軸になる。
+        #expect(status(screen: false, voicevox: true).summary.contains("GEMINI_API_KEY"))
+        #expect(status(screen: true, voicevox: false).summary.contains("VOICEVOX"))
+        let neither = status(screen: false, voicevox: false).summary
         #expect(neither.contains("API キー") && neither.contains("VOICEVOX"))
     }
 }
