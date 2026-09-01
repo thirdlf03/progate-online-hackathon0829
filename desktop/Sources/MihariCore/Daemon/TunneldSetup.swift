@@ -18,6 +18,15 @@ public enum TunneldSetup {
         return "do shell script \(appleScriptLiteral(path)) with administrator privileges"
     }
 
+    /// 解除スクリプトを管理者権限で実行する AppleScript を組み立てる。
+    ///
+    /// `install()` と同じく LaunchDaemon は root しか触れないため、
+    /// 管理者パスワードダイアログ経由で `uninstall_tunneld_daemon.sh` を 1 回実行する。
+    public static func uninstallScript(bridgeDirectory: String) -> String {
+        let path = bridgeDirectory + "/scripts/uninstall_tunneld_daemon.sh"
+        return "do shell script \(appleScriptLiteral(path)) with administrator privileges"
+    }
+
     /// AppleScript の文字列リテラルにする。引用符とバックスラッシュだけ気をつければよい。
     static func appleScriptLiteral(_ value: String) -> String {
         let escaped =
@@ -115,6 +124,48 @@ public final class TunneldModel: ObservableObject {
         } else {
             status = .notRunning
             message = "登録に失敗した(エラー \(outcome.errorNumber.map(String.init) ?? "不明"))"
+        }
+    }
+
+    /// 管理者パスワードダイアログを出して LaunchDaemon を解除する。
+    ///
+    /// セーフティートグル `iphoneScreenshot` を OFF にしたときに `AppCoordinator` が呼ぶ。
+    /// 解除に失敗しても壊れた状態にしないため、キャンセルや失敗では開始前の状態に戻す。
+    public func uninstall() async {
+        guard status != .installing else { return }
+        let previous = status
+        status = .installing
+        message = nil
+
+        let bridge: String
+        do {
+            bridge = try locator.bridgeDirectory()
+        } catch {
+            status = previous
+            message = "bridge/ が見つからない。DEVICE_BRIDGE_DIR を設定する"
+            return
+        }
+
+        let source = TunneldSetup.uninstallScript(bridgeDirectory: bridge)
+        let runner = self.runner
+        // パスワードダイアログが閉じるまで返ってこない同期呼び出しなので、メインを塞がない。
+        let outcome = await Task.detached { runner.run(source) }.value
+
+        if outcome.succeeded {
+            // 解除直後は tunneld の停止に少し時間がかかる。
+            try? await Task.sleep(for: settleDelay)
+            status = .unknown
+            await refresh()
+            message =
+                status == .running
+                ? "解除したが、まだ応答がある。数秒待って再確認する"
+                : "解除した。以後は再起動しても自動で立ち上がらない"
+        } else if outcome.errorNumber == -128 {
+            status = previous
+            message = "キャンセルされた"
+        } else {
+            status = previous
+            message = "解除に失敗した(エラー \(outcome.errorNumber.map(String.init) ?? "不明"))"
         }
     }
 }
