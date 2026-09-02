@@ -2,5 +2,29 @@
   "id": "mauve",
   "displayName": "Mauve",
   "description": "A poised gothic-lolita companion with twin black bows and mauve heart details.",
-  "spritesheetPath": "spritesheet.webp"
+  "spritesheetPath": "spritesheet.webp",
+  "wardrobe": {
+    "hairColors": [
+      { "id": "black", "label": "黒" },
+      { "id": "purple", "label": "紫" },
+      { "id": "gold", "label": "金" }
+    ],
+    "outfits": [
+      { "id": "gothic", "label": "ゴスロリ" },
+      { "id": "sailor", "label": "セーラー服" },
+      { "id": "pajamas", "label": "パジャマ" }
+    ],
+    "default": { "hairColor": "black", "outfit": "gothic" },
+    "variants": [
+      { "hairColor": "black", "outfit": "gothic", "spritesheetPath": "spritesheet.webp" },
+      { "hairColor": "black", "outfit": "sailor", "spritesheetPath": "variants/black-sailor/spritesheet.webp" },
+      { "hairColor": "black", "outfit": "pajamas", "spritesheetPath": "variants/black-pajamas/spritesheet.webp" },
+      { "hairColor": "purple", "outfit": "gothic", "spritesheetPath": "variants/purple-gothic/spritesheet.webp" },
+      { "hairColor": "purple", "outfit": "sailor", "spritesheetPath": "variants/purple-sailor/spritesheet.webp" },
+      { "hairColor": "purple", "outfit": "pajamas", "spritesheetPath": "variants/purple-pajamas/spritesheet.webp" },
+      { "hairColor": "gold", "outfit": "gothic", "spritesheetPath": "variants/gold-gothic/spritesheet.webp" },
+      { "hairColor": "gold", "outfit": "sailor", "spritesheetPath": "variants/gold-sailor/spritesheet.webp" },
+      { "hairColor": "gold", "outfit": "pajamas", "spritesheetPath": "variants/gold-pajamas/spritesheet.webp" }
+    ]
+  }
 }

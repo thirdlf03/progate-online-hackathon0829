@@ -101,6 +101,10 @@ public final class AppCoordinator: ObservableObject, PetMenuActions {
     private lazy var photobomb = ScreenshotPhotobombCompositor(
         say: { [weak self] line in
             self?.pet.controller.say(line)
+        },
+        currentLook: { [weak self] in
+            guard let self, let definition = self.pet.controller.currentPet else { return nil }
+            return (definition, self.pet.controller.wardrobeSelection)
         }
     )
     private let windows = AuxiliaryWindows()

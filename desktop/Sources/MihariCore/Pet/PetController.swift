@@ -42,6 +42,8 @@ public final class PetController {
     public private(set) var pets: [PetDefinition]
     /// いま表示しているペット。
     public private(set) var currentPet: PetDefinition?
+    /// いま選んでいる髪色と服。着せ替えを持たないペットでは nil。
+    public private(set) var wardrobeSelection: WardrobeSelection?
     /// いま表示すべきコマ。
     private(set) var currentFrame: CGImage?
     /// 再生中のアニメーション。
@@ -122,6 +124,9 @@ public final class PetController {
         static let scale = "pet.scale"
         static let originX = "pet.originX"
         static let originY = "pet.originY"
+        /// 着せ替えはペットごとに覚える。
+        static func wardrobeHairColor(_ petID: String) -> String { "pet.wardrobe.\(petID).hairColor" }
+        static func wardrobeOutfit(_ petID: String) -> String { "pet.wardrobe.\(petID).outfit" }
     }
 
     /// 歩く速さ(pt/秒)。コマ送りをゆっくりにした分、足の動きと移動が合うように落とした。
@@ -160,7 +165,9 @@ public final class PetController {
         self.voice = PetVoice(player: speechPlayer)
         let pets = PetLibrary.availablePets()
         self.pets = pets
-        self.currentPet = PetLibrary.pet(id: defaults.string(forKey: DefaultsKey.petID), in: pets)
+        let currentPet = PetLibrary.pet(id: defaults.string(forKey: DefaultsKey.petID), in: pets)
+        self.currentPet = currentPet
+        self.wardrobeSelection = Self.restoredWardrobeSelection(for: currentPet, defaults: defaults)
         self.isAwake = defaults.object(forKey: DefaultsKey.isAwake) as? Bool ?? true
         self.isVoiceEnabled = defaults.object(forKey: DefaultsKey.isVoiceEnabled) as? Bool ?? true
         self.scale = Self.restoredScale(from: defaults)
@@ -197,10 +204,76 @@ public final class PetController {
         guard pet.id != currentPet?.id else { return }
         currentPet = pet
         defaults.set(pet.id, forKey: DefaultsKey.petID)
+        wardrobeSelection = Self.restoredWardrobeSelection(for: pet, defaults: defaults)
         atlas = nil
         speechLines = PetSpeechLines.load(from: pet.speechURL)
         loadAtlasIfNeeded()
         restartAnimation()
+    }
+
+    // MARK: - 着せ替え
+
+    /// いま選んでいる服と組み合わせられる髪色。着せ替えを持たないペットでは空。
+    public var availableHairColors: [PetWardrobeOption] {
+        guard let currentPet, let wardrobe = currentPet.wardrobe, let selection = wardrobeSelection else {
+            return []
+        }
+        return wardrobe.hairColors.filter {
+            currentPet.isAvailable(WardrobeSelection(hairColor: $0.id, outfit: selection.outfit))
+        }
+    }
+
+    /// いま選んでいる髪色と組み合わせられる服。着せ替えを持たないペットでは空。
+    public var availableOutfits: [PetWardrobeOption] {
+        guard let currentPet, let wardrobe = currentPet.wardrobe, let selection = wardrobeSelection else {
+            return []
+        }
+        return wardrobe.outfits.filter {
+            currentPet.isAvailable(WardrobeSelection(hairColor: selection.hairColor, outfit: $0.id))
+        }
+    }
+
+    /// 髪色を変える。服はそのまま。
+    public func setHairColor(_ id: String) {
+        guard let selection = wardrobeSelection, selection.hairColor != id else { return }
+        applyWardrobe(WardrobeSelection(hairColor: id, outfit: selection.outfit))
+    }
+
+    /// 服を変える。髪色はそのまま。
+    public func setOutfit(_ id: String) {
+        guard let selection = wardrobeSelection, selection.outfit != id else { return }
+        applyWardrobe(WardrobeSelection(hairColor: selection.hairColor, outfit: id))
+    }
+
+    /// 着せ替えを適用してシートを読み直す。
+    ///
+    /// 選べない組み合わせは既定へ戻す。選べるものしかメニューに出さないので普通は起きないが、
+    /// 絵を消したあとなどに備えて防御的に見ている。動き・位置・大きさ・起きているかは変えない。
+    private func applyWardrobe(_ selection: WardrobeSelection) {
+        guard let currentPet, let wardrobe = currentPet.wardrobe else { return }
+        let resolved = currentPet.isAvailable(selection) ? selection : wardrobe.defaultSelection
+        guard resolved != wardrobeSelection else { return }
+        wardrobeSelection = resolved
+        defaults.set(resolved.hairColor, forKey: DefaultsKey.wardrobeHairColor(currentPet.id))
+        defaults.set(resolved.outfit, forKey: DefaultsKey.wardrobeOutfit(currentPet.id))
+        atlas = nil
+        loadAtlasIfNeeded()
+        updateCurrentFrame()
+    }
+
+    /// 保存された着せ替えを読む。保存が無いときも、選べない組み合わせだったときも既定へ戻す。
+    private static func restoredWardrobeSelection(
+        for pet: PetDefinition?,
+        defaults: UserDefaults
+    ) -> WardrobeSelection? {
+        guard let pet, let wardrobe = pet.wardrobe else { return nil }
+        let stored = WardrobeSelection(
+            hairColor: defaults.string(forKey: DefaultsKey.wardrobeHairColor(pet.id))
+                ?? wardrobe.defaultSelection.hairColor,
+            outfit: defaults.string(forKey: DefaultsKey.wardrobeOutfit(pet.id))
+                ?? wardrobe.defaultSelection.outfit
+        )
+        return pet.isAvailable(stored) ? stored : wardrobe.defaultSelection
     }
 
     /// 表示倍率を変える。ウィンドウは左下を保ったまま拡縮する。
@@ -560,7 +633,7 @@ public final class PetController {
     private func loadAtlasIfNeeded() {
         guard atlas == nil, let currentPet else { return }
         do {
-            atlas = try PetAtlas(definition: currentPet)
+            atlas = try PetAtlas(definition: currentPet, selection: wardrobeSelection)
             loadErrorMessage = nil
         } catch {
             atlas = nil

@@ -92,8 +92,11 @@ final class PetAtlas {
     private let frames: [PetAnimation: [CGImage]]
 
     /// スプライトシートを読み込み、全アニメーションのコマを切り出す。
-    init(definition: PetDefinition) throws {
-        let sheet = try Self.loadSheet(at: definition.spritesheetURL)
+    ///
+    /// - Parameter selection: 着せ替えの選択。選べない組み合わせと nil のときは
+    ///   トップレベルの `spritesheetPath` を読む。
+    init(definition: PetDefinition, selection: WardrobeSelection? = nil) throws {
+        let sheet = try Self.loadSheet(at: definition.spritesheetURL(for: selection))
         var frames: [PetAnimation: [CGImage]] = [:]
         for animation in PetAnimation.allCases {
             frames[animation] = try Self.crop(sheet: sheet, animation: animation)
