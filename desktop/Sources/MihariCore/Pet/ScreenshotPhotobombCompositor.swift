@@ -33,14 +33,22 @@ public final class ScreenshotPhotobombCompositor {
         "隠しても無駄だよ、あたし写り込むから",
     ]
 
-    /// 一度切り出したコマ。毎回スプライトシートを読み直す理由がない。
-    private var sprite: CGImage?
+    /// 一度切り出したコマ。切り出し元のシートが変わるまで使い回す。
+    private var sprite: (sheetURL: URL, image: CGImage)?
     private var lastSpokeAt: Date?
     private let say: (String) -> Void
+    private let currentLook: () -> (pet: PetDefinition, selection: WardrobeSelection?)?
 
-    /// - Parameter say: セリフを言わせる口。ペットの吹き出しに繋ぐ。
-    public init(say: @escaping (String) -> Void) {
+    /// - Parameters:
+    ///   - say: セリフを言わせる口。ペットの吹き出しに繋ぐ。
+    ///   - currentLook: いま表示しているペットと着せ替えの選択を教える口。
+    ///     nil を返したときは写り込みをやらない。
+    public init(
+        say: @escaping (String) -> Void,
+        currentLook: @escaping () -> (pet: PetDefinition, selection: WardrobeSelection?)?
+    ) {
         self.say = say
+        self.currentLook = currentLook
     }
 
     /// スクショにスプライトを描き足して同じパスへ上書きし、成功したらセリフを言う。
@@ -89,22 +97,24 @@ public final class ScreenshotPhotobombCompositor {
         say(line)
     }
 
-    /// 既定のペットのスプライトシートから、待機の先頭コマを切り出す。
+    /// いま表示しているペットのスプライトシートから、待機の先頭コマを切り出す。
     ///
     /// 待機は正面を向いているので、左下でも右下でも据わりが良い。
     private func loadSprite() -> CGImage? {
-        if let sprite { return sprite }
-        guard let pet = PetLibrary.pet(id: nil, in: PetLibrary.availablePets()) else {
+        guard let look = currentLook() else {
             Self.logger.error("ペットが 1 体も見つからないので写り込みはやらない")
             return nil
         }
+        // 着せ替えやペットを変えたら切り出し直す。
+        let sheetURL = look.pet.spritesheetURL(for: look.selection)
+        if let sprite, sprite.sheetURL == sheetURL { return sprite.image }
         do {
-            let atlas = try PetAtlas(definition: pet)
+            let atlas = try PetAtlas(definition: look.pet, selection: look.selection)
             guard let frame = atlas.frame(.idle, at: 0) else {
                 Self.logger.error("待機のコマを取り出せないので写り込みはやらない")
                 return nil
             }
-            sprite = frame
+            sprite = (sheetURL, frame)
             return frame
         } catch {
             Self.logger.error("スプライトシートを読めない: \(error.localizedDescription, privacy: .public)")

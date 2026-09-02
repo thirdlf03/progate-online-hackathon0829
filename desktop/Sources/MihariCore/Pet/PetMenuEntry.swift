@@ -71,6 +71,10 @@ public enum PetMenuEntries {
                     )
                 }
             ),
+        ]
+        // 着せ替えを持たないペットでは「髪色」「服」ごと出さない。
+        entries.append(contentsOf: wardrobeEntries(pet: pet))
+        entries.append(contentsOf: [
             .item(
                 title: "声を出す",
                 isChecked: pet.isVoiceEnabled,
@@ -88,7 +92,7 @@ public enum PetMenuEntries {
                 title: "設定…",
                 action: { actions.openSettings(tab: nil) }
             ),
-        ]
+        ])
         // 執行猶予脱出は quitLock が ON でロック中のときだけ出す(#52)。
         switch actions.escapeMenuState {
         case .available:
@@ -126,5 +130,41 @@ public enum PetMenuEntries {
             )
         }
         return entries
+    }
+
+    /// 「髪色」「服」のチェック式サブメニュー。着せ替えを持たないペットでは空を返す。
+    ///
+    /// 一覧は `wardrobe` に書いた順のまま全部出し、絵が無くて選べない組み合わせだけ灰色にする。
+    @MainActor
+    private static func wardrobeEntries(pet: PetController) -> [PetMenuEntry] {
+        guard let wardrobe = pet.currentPet?.wardrobe, let selection = pet.wardrobeSelection else {
+            return []
+        }
+        let hairColors = Set(pet.availableHairColors.map(\.id))
+        let outfits = Set(pet.availableOutfits.map(\.id))
+        return [
+            .submenu(
+                title: "髪色",
+                entries: wardrobe.hairColors.map { option -> PetMenuEntry in
+                    .item(
+                        title: option.label,
+                        isChecked: selection.hairColor == option.id,
+                        isEnabled: hairColors.contains(option.id),
+                        action: { pet.setHairColor(option.id) }
+                    )
+                }
+            ),
+            .submenu(
+                title: "服",
+                entries: wardrobe.outfits.map { option -> PetMenuEntry in
+                    .item(
+                        title: option.label,
+                        isChecked: selection.outfit == option.id,
+                        isEnabled: outfits.contains(option.id),
+                        action: { pet.setOutfit(option.id) }
+                    )
+                }
+            ),
+        ]
     }
 }

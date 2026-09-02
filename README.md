@@ -204,6 +204,8 @@ Dock のアイコンは残る。クリックすると、しまわれているペ
 | 在席スタンプを押す | Touch ID で在席を証明する。直後は撮りに行かない。**5 分の猶予が付くのはこのメニューから押したときだけ**(疑い 1 の Touch ID では付かない) |
 | 休憩する(15 分) / 休憩を終える | 休憩に入る / 切り上げる |
 | サイズ | 小 / 中 / 大 |
+| 髪色 | `wardrobe` の髪色を書いた順・そのラベルで並べる。チェック式。絵が無い組み合わせは灰色 |
+| 服 | `wardrobe` の服を書いた順・そのラベルで並べる。チェック式。絵が無い組み合わせは灰色 |
 | 声を出す | ひとりごとを読み上げるか |
 | スクショに写り込む | 保存されたスクリーンショットにペットを描き足すか |
 | 設定… | 「セーフティー」「Discord」「権限」の 3 タブを持つ設定ウィンドウを開く。最上段のモード表示の行を押すと、そのままセーフティータブが開く |
@@ -281,6 +283,22 @@ Gemini に見せて「何のアプリで何をしているか」に触れたセ�
 ```
 
 `${CODEX_HOME:-~/.codex}/pets/<id>/` にある Codex Desktop 用のカスタムペットも自動で一覧に出る。id が同梱ペットと重なる場合は同梱側を優先し、壊れた `pet.json` は読み飛ばす。
+
+任意で `wardrobe` を足すと、髪色 × 服の着せ替えになる。右クリック →「髪色」「服」で切り替えられ、選んだ組み合わせはペットごとに覚える。
+
+```json
+"wardrobe": {
+  "hairColors": [ { "id": "black", "label": "黒" }, { "id": "purple", "label": "紫" } ],
+  "outfits":    [ { "id": "gothic", "label": "ゴスロリ" }, { "id": "sailor", "label": "セーラー服" } ],
+  "default":    { "hairColor": "black", "outfit": "gothic" },
+  "variants": [
+    { "hairColor": "black",  "outfit": "gothic", "spritesheetPath": "spritesheet.webp" },
+    { "hairColor": "purple", "outfit": "gothic", "spritesheetPath": "variants/purple-gothic/spritesheet.webp" }
+  ]
+}
+```
+
+シートは `variants/<髪色 id>-<服 id>/spritesheet.webp` に置く。**`variants` に記載があり、かつファイルが実在する組み合わせだけが選べる**(それ以外はメニューで灰色)ので、絵を足すたびに `pet.json` を直さなくてよい。`wardrobe` を書かなければ従来どおり 1 枚だけで動く。詳しくは [docs/pet.md](docs/pet.md) の「着せ替え」。
 
 ### セリフ
 

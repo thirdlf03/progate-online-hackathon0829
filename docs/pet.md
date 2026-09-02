@@ -77,7 +77,7 @@
 
 ### メニュー
 
-右クリックメニュー(`PetContextMenu`)とメニューバーの「ペット」(`PetMenuContent`)は `PetMenuEntries.make` から作るので中身が同じ。すぐ触りたい操作だけを並べ、じっくり決める設定は「設定…」の 3 タブに寄せてある。現行は 7 項目 +「サイズ」サブメニューと「デバッグ」サブメニュー。
+右クリックメニュー(`PetContextMenu`)とメニューバーの「ペット」(`PetMenuContent`)は `PetMenuEntries.make` から作るので中身が同じ。すぐ触りたい操作だけを並べ、じっくり決める設定は「設定…」の 3 タブに寄せてある。現行は 7 項目 +「サイズ」「髪色」「服」のサブメニューと「デバッグ」サブメニュー。
 
 | 項目 | 内容 |
 | --- | --- |
@@ -85,6 +85,8 @@
 | 在席スタンプを押す | `stampAttendance()`。Touch ID で在席を証明する。指を差し出すカットインとセリフの演出が付く(後述) |
 | 休憩する(15 分) / 休憩を終える | `startBreak()` / `endBreak()` |
 | サイズ(サブメニュー) | 小 = 0.5 / 中 = 0.75 / 大 = 1.0。チェック式 |
+| 髪色(サブメニュー) | `wardrobe` の `hairColors` をその順・そのラベルで。チェック式。`pet.setHairColor(id)`(後述の「着せ替え」) |
+| 服(サブメニュー) | `wardrobe` の `outfits` をその順・そのラベルで。チェック式。`pet.setOutfit(id)` |
 | 声を出す | チェック式。`pet.setVoiceEnabled(!isVoiceEnabled)` |
 | スクショに写り込む | チェック式。`setPhotobombEnabled(!isPhotobombEnabled)` |
 | 設定… | `openSettings(tab: nil)`。前回開いていたタブのまま設定ウィンドウを出す(初回は「セーフティー」) |
@@ -92,6 +94,8 @@
 最上段はセーフティーモードの 1 行表示(`safetyStatusLine`)で、押すと `openSettings(tab: .safety)` でセーフティータブが開く。
 
 区切り線はモード行の後、「休憩する」の後、「スクショに写り込む」の後(「設定…」の手前)の 3 本。`autoenablesItems = false`。
+
+「髪色」「服」は `pet.json` に `wardrobe` を書いたペットにだけ出る。書いていないペットでは 2 つともサブメニューごと出ない。
 
 設定ウィンドウ(`SettingsView`・題は「設定」・720 × 760)は「セーフティー」(`SafetyModeView`)「Discord」(`DiscordView`)「権限」(`OnboardingView`)の 3 タブ。選ばれているタブは `SettingsTabSelection` が持ち、ウィンドウを閉じても覚えている。どのタブの「閉じる」もウィンドウ全体を閉じる。
 
@@ -121,6 +125,36 @@
 静止中(監視停止中・休憩中)は `playOnce` が無視されるので、「1 回だけ再生」を押しても何も起きない。
 
 README にあった「しゃべる」「しまう / 起こす」「ペット」の 3 項目は現行コードに無い。`PetController.conceal()` / `LivePetPresenter.hide()` は残っているが、呼び出し元が無い。
+
+## 着せ替え(髪色 × 服)
+
+`pet.json` に `wardrobe` を書くと、髪色と服の組み合わせごとにスプライトシートを差し替えられる。書かなければ従来どおり `spritesheetPath` の 1 枚だけで動く(`~/.codex/pets/` のカスタムペットも同じ)。
+
+```json
+"wardrobe": {
+  "hairColors": [ { "id": "black", "label": "黒" }, { "id": "purple", "label": "紫" } ],
+  "outfits":    [ { "id": "gothic", "label": "ゴスロリ" }, { "id": "sailor", "label": "セーラー服" } ],
+  "default":    { "hairColor": "black", "outfit": "gothic" },
+  "variants": [
+    { "hairColor": "black",  "outfit": "gothic", "spritesheetPath": "spritesheet.webp" },
+    { "hairColor": "purple", "outfit": "gothic", "spritesheetPath": "variants/purple-gothic/spritesheet.webp" }
+  ]
+}
+```
+
+| 項目 | 値・規則 |
+| --- | --- |
+| 置き場所 | `pets/<id>/variants/<髪色 id>-<服 id>/spritesheet.webp`。既定の組み合わせだけはトップレベルの `spritesheet.webp` をそのまま使い回す |
+| シートの規約 | バリアントも通常のシートと同じ 8 列 × 9 行・1536 × 1872 px。大きさが違うと読み込みに失敗する(`PetAtlasError`) |
+| 選べる条件 | **`variants` に記載があり、かつシートが実在すること**(`PetDefinition.isAvailable`)。記載なしとファイル欠損はどちらも「絵が無い」として同じに扱う |
+| 絵が無い組み合わせ | メニューでは灰色にして押せなくする。あとから画像を置けば、それだけで選べるようになる |
+| `default` | 必須。保存された選択が選べないときの戻り先。万一 `default` の絵も無ければトップレベルの `spritesheetPath` で描く |
+| 保存 | `UserDefaults` にペットごと。`pet.wardrobe.<ペット id>.hairColor` / `.outfit`。起動時とペット切り替え時に読み直し、選べない組み合わせなら `default` に戻す |
+| 切り替え | シートを読み直して差し替えるだけ。再生中のアニメーション・コマ・位置・表示倍率・起きているかは変えない |
+| カットイン | 既定固定で、組み合わせでは変えない。`variants[].cutinDirectory` を書けばそのディレクトリを先に見る(そこに無い絵は `cutin/` に落ちる)構造だけ用意してあるが、同梱ペットでは指定していない |
+| スクショの写り込み | いま表示しているペットと着せ替えのシートから `idle` の 0 コマ目を取る(`ScreenshotPhotobombCompositor`) |
+
+同梱の mauve は 3 髪色(黒 / 紫 / 金) × 3 服(ゴスロリ / セーラー服 / パジャマ)の 9 通りを `variants` に書いてあるが、**いま絵があるのは既定の 黒 × ゴスロリ だけ。** 残り 8 通りはメニューに灰色で並び、`variants/<髪色>-<服>/spritesheet.webp` を置いた時点で選べるようになる。
 
 ## 吹き出し
 
@@ -195,7 +229,7 @@ README にあった「しゃべる」「しまう / 起こす」「ペット」�
 
 | 項目 | 値・規則 |
 | --- | --- |
-| 置き場所 | `pets/<id>/cutin/reach.png` / `touched.png` / `failed.png`。`pet.json` には書かず、置いてあるかどうかだけで決まる(`PetDefinition.cutInImageURL`) |
+| 置き場所 | `pets/<id>/cutin/reach.png` / `touched.png` / `failed.png`。`pet.json` には書かず、置いてあるかどうかだけで決まる(`PetDefinition.cutInImageURL`)。着せ替えのバリアントに `cutinDirectory` を書いたときだけ、そちらを先に見る(後述の「着せ替え」) |
 | 出る条件 | 3 枚とも揃っていて、かつ Touch ID が使える(`isBiometricsAvailable`)とき。パスワードにフォールバックする環境では「指を合わせる」が成立しないので、動きとセリフだけになる |
 | ウィンドウ | `AttendanceCutInWindow`(`NSPanel`、`level = .floating`、`ignoresMouseEvents = true`)。認証ダイアログの操作は必ず下へ通す |
 | 配置 | ペットがいる画面の `visibleFrame` の右下に密着。正方形で、一辺は画面の高さの 50%(上限 900 pt) |
