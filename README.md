@@ -126,6 +126,26 @@ python3 scripts/generate_voice_lines.py --url http://127.0.0.1:50021
 Bot は `DISCORD_BOT_TOKEN` が設定されていれば、セーフティーの「Discord に晒す」が OFF でもデーモンの起動時に Discord へ接続し、つながったままになる(スラッシュコマンドやチャンネル一覧のため)。
 トグルで止まるのは**投稿だけ**で、接続そのものを切りたいならトークンを外す。
 
+### 認証情報(自分の Bot と API キー)
+
+Bot トークンと Gemini の API キーは配布物に同梱できないので、各自で用意する。同じ「Discord」タブの
+「認証情報」に入れて「保存してデーモンを再起動」を押すと、`~/.mihari/.env`(`MIHARI_SETTINGS_DIR` を
+設定していればそのディレクトリ)に**本人だけが読める権限**で書き込み、新しい値でデーモンをつなぎ直す。
+入れた値は画面に出さない(出るのは「設定済み / 未設定」だけ)。キーごとの「削除」で外せる。
+
+Discord Bot の作り方:
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) で **New Application**
+2. 「General Information」の **APPLICATION ID** を `DISCORD_CLIENT_ID` に入れる
+3. 「Bot」タブで **Reset Token** して、出てきたトークンを `DISCORD_BOT_TOKEN` に入れる
+4. 「招待 URL を開く」から自分のサーバに Bot を入れる
+
+Gemini の API キーは [Google AI Studio](https://aistudio.google.com/apikey) で作る。未設定でもアプリは
+動く(iPhone の画面を読まなくなり、セリフが同梱の固定文言になるだけ)。
+
+開発中は `bridge/.env` に直接書いてもよい。読む順は**実環境変数 > `~/.mihari/.env` > `bridge/.env`**
+なので、画面から保存した値の方が `bridge/.env` より優先される。
+
 ### 呼びつける相手(メンション)
 
 同じ画面の「メンション先」に Discord のユーザー ID を入れて「保存」を押すと、投稿の先頭に
@@ -144,11 +164,6 @@ ID の調べ方:
 1 行目で「何をしていたか」を言い、2 行目(Discord の小文字表示)に事実を並べる。
 iPhone の画面を撮れたときは、そこに映っていたアプリと大まかな内容に触れる。
 全パターンは [docs/pet.md](docs/pet.md) の「Discord の文面」にある。
-
-### リリース時の別課題
-
-`DISCORD_BOT_TOKEN`（Bot トークン）を誰が持つか——配布物に同梱するか、各ユーザーが自分の
-Bot を作るか——は未定。認証情報なのでコミットはせず、リリース時に決める。
 
 ## bridge
 

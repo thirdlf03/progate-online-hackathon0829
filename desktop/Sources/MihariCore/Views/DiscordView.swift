@@ -12,6 +12,18 @@ public struct DiscordView: View {
     /// `discord.status` から ID を書き戻したか。手で編集した内容を上書きしないため 1 回だけにする。
     @State private var hasLoadedMention = false
 
+    /// 認証情報の入力欄。保存したら空に戻す。保存済みの値は読み戻さない。
+    @State private var clientIDInput = ""
+    @State private var botTokenInput = ""
+    @State private var geminiKeyInput = ""
+    /// `.env` に値が入っているキー。画面に出すのは「設定済みかどうか」だけにする。
+    @State private var configuredKeys: Set<EnvFileStore.Key> = []
+    @State private var credentialNotice: String?
+    @State private var credentialError: String?
+
+    /// 認証情報の置き場所。既定は `~/.mihari/.env`。
+    private let credentials = EnvFileStore()
+
     public init(discord: DiscordController, daemon: DaemonController) {
         self.discord = discord
         self.daemon = daemon
@@ -22,6 +34,7 @@ public struct DiscordView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 setupSteps
+                credentialsSection
                 channelSection
                 mentionSection
                 scheduleSection
@@ -36,7 +49,10 @@ public struct DiscordView: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task { await discord.refresh(using: daemon.connectedClient) }
+        .task {
+            configuredKeys = credentials.configuredKeys()
+            await discord.refresh(using: daemon.connectedClient)
+        }
         .onChange(of: discord.status?.mentionUserID) { _, saved in
             guard !hasLoadedMention else { return }
             hasLoadedMention = true
@@ -75,7 +91,7 @@ public struct DiscordView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("セットアップ").font(.headline)
             step(1, "Discord Developer Portal でアプリを作る", done: discord.status?.clientIDConfigured == true)
-            step(2, "APPLICATION ID と Bot トークンを bridge/.env に書く", done: discord.status?.tokenConfigured == true)
+            step(2, "APPLICATION ID と Bot トークンを下の「認証情報」に入れる", done: discord.status?.tokenConfigured == true)
             step(3, "招待 URL から自分のサーバに Bot を入れる", done: discord.status?.botReady == true)
             step(4, "投稿先チャンネルを選ぶ", done: discord.status?.selection != nil)
 
@@ -83,7 +99,7 @@ public struct DiscordView: View {
                 Button("招待 URL を開く") { discord.openInvite() }
                     .disabled(discord.status?.inviteURL == nil)
                 if let missing = discord.status?.missing, !missing.isEmpty {
-                    Text("bridge/.env に \(missing.joined(separator: " / ")) が必要")
+                    Text("\(missing.joined(separator: " / ")) が未設定")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -102,6 +118,140 @@ public struct DiscordView: View {
             Text(text).font(.callout).foregroundStyle(done ? .secondary : .primary)
             Spacer()
         }
+    }
+
+    /// bridge が使う認証情報。値は `~/.mihari/.env` に置き、画面には出さない。
+    ///
+    /// 配布物にトークンは同梱できないので、各自が自分の Bot と API キーをここに入れる。
+    private var credentialsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("認証情報").font(.headline)
+            Text(
+                "自分で用意した Bot トークンと API キーを入れる。保存先は \(credentials.url.path)"
+                    + "(本人だけが読める権限で書く)。入れた値は画面に出さないので、"
+                    + "変えるときだけ入力する。"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            credentialRow(
+                .discordClientID,
+                text: $clientIDInput,
+                secure: false,
+                hint: "Developer Portal →「General Information」の APPLICATION ID"
+            )
+            credentialRow(
+                .discordBotToken,
+                text: $botTokenInput,
+                secure: true,
+                hint: "Developer Portal →「Bot」タブの Reset Token で発行する"
+            )
+            credentialRow(
+                .geminiAPIKey,
+                text: $geminiKeyInput,
+                secure: true,
+                hint: "Google AI Studio で発行する。未設定でも動く(iPhone の画面を読まなくなる)"
+            )
+
+            HStack(spacing: 10) {
+                Button("保存してデーモンを再起動") { Task { await saveCredentials() } }
+                    .disabled(!hasCredentialInput)
+                Spacer()
+            }
+
+            if let notice = credentialNotice {
+                noticeBox(notice)
+            }
+            if let error = credentialError {
+                errorBox(error)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func credentialRow(
+        _ key: EnvFileStore.Key,
+        text: Binding<String>,
+        secure: Bool,
+        hint: String
+    ) -> some View {
+        let isConfigured = configuredKeys.contains(key)
+        let placeholder = isConfigured ? "設定済み" : "未設定"
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(key.label)
+                    .font(.callout)
+                    .frame(width: 130, alignment: .leading)
+                if secure {
+                    SecureField(placeholder, text: text)
+                } else {
+                    TextField(placeholder, text: text)
+                }
+                Label(
+                    placeholder,
+                    systemImage: isConfigured ? "checkmark.circle.fill" : "circle.dashed"
+                )
+                .font(.caption)
+                .foregroundStyle(isConfigured ? Color.green : Color.secondary)
+                .frame(width: 80, alignment: .leading)
+                Button("削除") { Task { await removeCredential(key) } }
+                    .controlSize(.small)
+                    .disabled(!isConfigured)
+            }
+            Text(hint)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// 入力欄に何か入っているか。空のまま保存しても変わるものが無いので、そのときは押せない。
+    private var hasCredentialInput: Bool {
+        [clientIDInput, botTokenInput, geminiKeyInput]
+            .contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    /// 入力済みのフィールドだけを書く。空のフィールドは触らない(消すのは「削除」)。
+    private func saveCredentials() async {
+        do {
+            try credentials.save([
+                .discordClientID: clientIDInput,
+                .discordBotToken: botTokenInput,
+                .geminiAPIKey: geminiKeyInput,
+            ])
+        } catch {
+            credentialNotice = nil
+            credentialError = error.localizedDescription
+            return
+        }
+        clientIDInput = ""
+        botTokenInput = ""
+        geminiKeyInput = ""
+        await applyCredentialChange(notice: "保存してデーモンを再起動した")
+    }
+
+    private func removeCredential(_ key: EnvFileStore.Key) async {
+        do {
+            try credentials.remove([key])
+        } catch {
+            credentialNotice = nil
+            credentialError = error.localizedDescription
+            return
+        }
+        await applyCredentialChange(notice: "\(key.label) を削除してデーモンを再起動した")
+    }
+
+    /// 書き換えたあとの後始末。デーモンを入れ直して、新しいトークンで Discord につなぎ直す。
+    private func applyCredentialChange(notice: String) async {
+        credentialError = nil
+        credentialNotice = nil
+        configuredKeys = credentials.configuredKeys()
+        await daemon.restart()
+        credentialNotice = notice
+        await discord.refresh(using: daemon.connectedClient)
     }
 
     private var channelSection: some View {

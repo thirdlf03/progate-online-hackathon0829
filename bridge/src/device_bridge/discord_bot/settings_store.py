@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from device_bridge.settings_paths import settings_directory
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_DIRECTORY = "~/.mihari"
 SETTINGS_FILE = "discord.json"
 
 #: メンション先のユーザー ID を入れるキー。
@@ -67,8 +67,7 @@ class SettingsStore:
     """
 
     def __init__(self, directory: str | Path | None = None) -> None:
-        raw = directory or os.environ.get("MIHARI_SETTINGS_DIR") or DEFAULT_DIRECTORY
-        self._path = Path(raw).expanduser() / SETTINGS_FILE
+        self._path = settings_directory(directory) / SETTINGS_FILE
 
     @property
     def path(self) -> Path:

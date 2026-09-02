@@ -39,7 +39,7 @@ public final class DiscordController: ObservableObject {
     /// 招待 URL をブラウザで開く。
     public func openInvite() {
         guard let raw = status?.inviteURL, let url = URL(string: raw) else {
-            lastError = "招待 URL がない。bridge/.env の DISCORD_CLIENT_ID を設定する"
+            lastError = "招待 URL がない。DISCORD_CLIENT_ID を設定する"
             return
         }
         NSWorkspace.shared.open(url)
