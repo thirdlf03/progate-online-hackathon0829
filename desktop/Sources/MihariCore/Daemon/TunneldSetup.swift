@@ -13,9 +13,17 @@ public enum TunneldSetup {
     public static let apiURL = URL(string: "http://127.0.0.1:49151/")!
 
     /// 登録スクリプトを管理者権限で実行する AppleScript を組み立てる。
-    public static func installScript(bridgeDirectory: String) -> String {
+    ///
+    /// `pymobiledevice3Path` を渡すと、スクリプトはそのバイナリを直接 launchd に登録する。
+    /// `.app` に同梱した `pymobiledevice3` を使わせるための入口。渡さなければ、
+    /// スクリプトは従来どおり自分で `uv` を探して `bridge/` 越しに起動する。
+    public static func installScript(bridgeDirectory: String, pymobiledevice3Path: String? = nil) -> String {
         let path = bridgeDirectory + "/scripts/install_tunneld_daemon.sh"
-        return "do shell script \(appleScriptLiteral(path)) with administrator privileges"
+        guard let pymobiledevice3Path else {
+            return "do shell script \(appleScriptLiteral(path)) with administrator privileges"
+        }
+        let command = "PYMOBILEDEVICE3_PATH=\(shellLiteral(pymobiledevice3Path)) \(shellLiteral(path))"
+        return "do shell script \(appleScriptLiteral(command)) with administrator privileges"
     }
 
     /// 解除スクリプトを管理者権限で実行する AppleScript を組み立てる。
@@ -25,6 +33,12 @@ public enum TunneldSetup {
     public static func uninstallScript(bridgeDirectory: String) -> String {
         let path = bridgeDirectory + "/scripts/uninstall_tunneld_daemon.sh"
         return "do shell script \(appleScriptLiteral(path)) with administrator privileges"
+    }
+
+    /// `do shell script` に渡すコマンド行の中で、1 語として扱わせるためのシェルリテラル。
+    /// シングルクォートで囲めば中身は素通りするので、閉じる引用符だけ処理すればよい。
+    static func shellLiteral(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 
     /// AppleScript の文字列リテラルにする。引用符とバックスラッシュだけ気をつければよい。
@@ -107,7 +121,11 @@ public final class TunneldModel: ObservableObject {
             return
         }
 
-        let source = TunneldSetup.installScript(bridgeDirectory: bridge)
+        // 同梱の pymobiledevice3 があればそれを登録させる。無ければスクリプトが uv を探す。
+        let source = TunneldSetup.installScript(
+            bridgeDirectory: bridge,
+            pymobiledevice3Path: locator.bundledPymobiledevice3Path()
+        )
         let runner = self.runner
         // パスワードダイアログが閉じるまで返ってこない同期呼び出しなので、メインを塞がない。
         let outcome = await Task.detached { runner.run(source) }.value

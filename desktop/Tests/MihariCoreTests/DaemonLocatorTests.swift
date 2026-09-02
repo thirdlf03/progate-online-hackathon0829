@@ -76,3 +76,103 @@ struct DaemonLocatorTests {
         #expect(DaemonLocator.repositoryBridgePath.hasSuffix("/bridge"))
     }
 }
+
+@Suite("同梱バイナリと uv のどちらで動かすかの決定")
+struct DaemonSourceResolutionTests {
+
+    /// `.app` に同梱されている状況を作る。Resources/device-bridge に 2 本並んでいる。
+    private func bundledLocator(
+        environment: [String: String] = [:],
+        executables: Set<String> = [
+            "/App.app/Contents/Resources/device-bridge/device-bridge",
+            "/App.app/Contents/Resources/device-bridge/pymobiledevice3",
+        ]
+    ) -> DaemonLocator {
+        DaemonLocator(
+            environment: environment,
+            isExecutable: { executables.contains($0) },
+            directoryExists: { _ in true },
+            resourcesPath: "/App.app/Contents/Resources"
+        )
+    }
+
+    @Test("同梱バイナリがあればそれを使う(uv は要らない)")
+    func prefersBundledBinary() throws {
+        let locator = bundledLocator()
+        #expect(
+            try locator.resolve(home: "/Users/x")
+                == .bundled(directory: "/App.app/Contents/Resources/device-bridge")
+        )
+    }
+
+    @Test("DEVICE_BRIDGE_DIR があれば同梱バイナリより優先する")
+    func explicitBridgeDirWins() throws {
+        // 開発中に手元の bridge/ を差し込むための明示指定なので、同梱物に勝つ。
+        let locator = bundledLocator(
+            environment: ["DEVICE_BRIDGE_DIR": "/repo/bridge", "UV_PATH": "/custom/uv"],
+            executables: [
+                "/App.app/Contents/Resources/device-bridge/device-bridge",
+                "/App.app/Contents/Resources/device-bridge/pymobiledevice3",
+                "/custom/uv",
+            ]
+        )
+        #expect(
+            try locator.resolve(home: "/Users/x")
+                == .source(bridgeDirectory: "/repo/bridge", uvPath: "/custom/uv")
+        )
+    }
+
+    @Test("同梱されていなければ uv と bridge/ を探す")
+    func fallsBackToSource() throws {
+        let locator = DaemonLocator(
+            environment: [:],
+            isExecutable: { $0 == "/opt/homebrew/bin/uv" },
+            directoryExists: { _ in true },
+            resourcesPath: "/App.app/Contents/Resources"
+        )
+        #expect(
+            try locator.resolve(home: "/Users/x")
+                == .source(bridgeDirectory: DaemonLocator.repositoryBridgePath, uvPath: "/opt/homebrew/bin/uv")
+        )
+    }
+
+    @Test("同梱もされておらず uv も無ければ失敗する")
+    func missingBothFails() {
+        let locator = DaemonLocator(
+            environment: [:],
+            isExecutable: { _ in false },
+            directoryExists: { _ in true },
+            resourcesPath: "/App.app/Contents/Resources"
+        )
+        #expect(throws: DaemonError.uvNotFound) { try locator.resolve(home: "/Users/x") }
+    }
+
+    @Test("同梱した pymobiledevice3 のパスを返す")
+    func findsBundledPymobiledevice3() {
+        let locator = bundledLocator()
+        #expect(
+            locator.bundledPymobiledevice3Path()
+                == "/App.app/Contents/Resources/device-bridge/pymobiledevice3"
+        )
+    }
+
+    @Test("device-bridge だけあって pymobiledevice3 が無ければ nil")
+    func missingBundledPymobiledevice3IsNil() {
+        let locator = bundledLocator(
+            executables: ["/App.app/Contents/Resources/device-bridge/device-bridge"]
+        )
+        #expect(locator.bundledPymobiledevice3Path() == nil)
+    }
+
+    @Test("Resources が分からなければ同梱物は無いものとして扱う")
+    func noResourcesPathMeansNoBundle() {
+        let locator = DaemonLocator(
+            environment: [:],
+            isExecutable: { _ in true },
+            directoryExists: { _ in true },
+            resourcesPath: nil
+        )
+        #expect(locator.bundledDirectory() == nil)
+        #expect(locator.bundledPymobiledevice3Path() == nil)
+    }
+}

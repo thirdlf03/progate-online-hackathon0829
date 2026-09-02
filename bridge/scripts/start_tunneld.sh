@@ -12,6 +12,9 @@
 #
 # `uv` が PATH に無い環境向けに `UV_PATH` で明示的に指定できる(ルート README.md の
 # 環境変数の説明と同じ探索順)。
+#
+# `PYMOBILEDEVICE3_PATH` に実行できるバイナリを渡すと、uv を使わずにそれを直接起動する。
+# 配布した `Mihari.app` に同梱した `pymobiledevice3` を指すために使う。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +34,19 @@ find_uv() {
   done
   command -v uv
 }
+
+if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
+  # 同梱バイナリを渡された場合は uv を一切使わない。
+  if [[ ! -x "${PYMOBILEDEVICE3_PATH}" ]]; then
+    echo "error: PYMOBILEDEVICE3_PATH が実行できない: ${PYMOBILEDEVICE3_PATH}" >&2
+    exit 1
+  fi
+  if [[ "$(id -u)" -ne 0 ]]; then
+    echo "tunneld は root 権限が必要なため、sudo で再実行する。" >&2
+    exec sudo "${PYMOBILEDEVICE3_PATH}" remote tunneld
+  fi
+  exec "${PYMOBILEDEVICE3_PATH}" remote tunneld
+fi
 
 UV_BIN="$(find_uv)"
 

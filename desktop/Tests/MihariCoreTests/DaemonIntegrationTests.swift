@@ -5,13 +5,13 @@ import Testing
 
 /// 実際に `device-bridge serve` を起動して、アプリ側の経路が端まで通ることを確かめる。
 ///
-/// uv と同期済みの `bridge/` が要る。用意されていない環境では丸ごとスキップする。
+/// 同梱バイナリか、uv と同期済みの `bridge/` が要る。
+/// どちらも用意されていない環境では丸ごとスキップする。
 enum DaemonAvailability {
-    /// uv と同期済みの bridge/ が揃っているか。
+    /// デーモンを動かす手段があるか。
     /// 自分自身を参照する条件をスイート内に置くとマクロが循環するため、外に出している。
     static var isReady: Bool {
-        let locator = DaemonLocator()
-        return (try? locator.uvPath()) != nil && (try? locator.bridgeDirectory()) != nil
+        (try? DaemonLocator().resolve()) != nil
     }
 }
 

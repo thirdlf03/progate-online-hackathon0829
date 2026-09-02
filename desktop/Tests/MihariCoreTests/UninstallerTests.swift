@@ -47,7 +47,9 @@ struct UninstallerTests {
             locator: DaemonLocator(
                 environment: ["DEVICE_BRIDGE_DIR": "/repo/bridge"],
                 isExecutable: { _ in true },
-                directoryExists: { _ in true }
+                directoryExists: { _ in true },
+                // テストバイナリ自身の Resources を同梱物と誤認しないように切る。
+                resourcesPath: nil
             ),
             settleDelay: .zero
         )

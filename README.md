@@ -66,6 +66,7 @@ make setup   # bridge/ の Python 依存を同期する(初回のみ)
 make run     # macOS アプリを起動する
 make fmt     # Swift / Python を整形する
 make lint    # フォーマットと lint を検査する
+make dist    # 配布用の Mihari.app を作る(受け取る側に uv も Python も要らない)
 ```
 
 | ターゲット | 内容 |
@@ -75,10 +76,33 @@ make lint    # フォーマットと lint を検査する
 | `lint` | `swift format lint --strict` と `ruff check` / `ruff format --check` |
 | `build` | `cd desktop && ./build.sh`(`Mihari.app` を組み立てて ad-hoc 署名する) |
 | `run` | `cd desktop && ./run.sh`(ビルドして `Mihari.app` を起動する) |
+| `dist` | `bridge` を PyInstaller で固めて `Mihari.app` に同梱し、`Mihari-<バージョン>.zip` にする(下記) |
 | `test` | `cd desktop && swift test` と `cd bridge && uv run pytest` |
 | `clean` | `rm -rf desktop/.build desktop/Mihari.app` |
 
 Swift の整形設定は `desktop/.swift-format`、Python の設定は `bridge/pyproject.toml` の `[tool.ruff]` にある。
+
+### 配布用のビルド(`make dist`)
+
+`make build` で作る `Mihari.app` は、Python 側のデーモン(`bridge/`)を動かすのに
+リポジトリと `uv` を必要とする。**`make dist` はそこを切り離す。**
+
+1. `bridge/` を [PyInstaller](https://pyinstaller.org/) で 1 ディレクトリに固める
+   (`device-bridge` と `pymobiledevice3` の 2 本。設定は `bridge/device-bridge.spec`)
+2. それを `Mihari.app/Contents/Resources/device-bridge/` に同梱して署名する
+3. 同梱後のバイナリで `bridge/scripts/smoke_frozen.sh` を回し、`list` / `serve` /
+   `pymobiledevice3 --help` が動くことを確かめる
+4. `Mihari-<バージョン>.zip` に固める(バージョンは `Info.plist` の `CFBundleShortVersionString`)
+
+出来上がった `.app` は、**受け取った人の Mac に uv も Python も要らない。**
+アプリは `Contents/Resources/device-bridge/device-bridge` があればそれを使い、
+無ければ従来どおり `uv` と `bridge/` を探す(`DEVICE_BRIDGE_DIR` を設定した場合は
+同梱物より手元の `bridge/` が優先される。開発中に差し込むための入口)。
+
+同梱する `bridge` には **GPL-3.0 の [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) が
+バイナリとして含まれる**。対応する条文と権利表示を一緒に配る必要があるため、
+`Contents/Resources/licenses/` に [`LICENSE`](LICENSE)・[`LICENSE-GPL-3.0`](LICENSE-GPL-3.0)・
+[`NOTICE.md`](NOTICE.md) の 3 つを入れてある。zip を再配布するときもこの 3 つを外さないこと。
 
 ## 音声
 
@@ -353,7 +377,8 @@ Gemini に見せて「何のアプリで何をしているか」に触れたセ�
 | 変数 | 用途 |
 | --- | --- |
 | `UV_PATH` | `uv` の実行ファイルパス。未設定なら `~/.local/bin/uv`, `/opt/homebrew/bin/uv`, `/usr/local/bin/uv` の順に探索する |
-| `DEVICE_BRIDGE_DIR` | `bridge/` のパス。未設定ならソース位置からリポジトリルートを逆算して `<root>/bridge` を使う |
+| `DEVICE_BRIDGE_DIR` | `bridge/` のパス。設定すると `.app` に同梱したバイナリより優先される。未設定で同梱も無ければ、ソース位置からリポジトリルートを逆算して `<root>/bridge` を使う |
+| `PYMOBILEDEVICE3_PATH` | tunneld の登録/起動スクリプト(`bridge/scripts/install_tunneld_daemon.sh`・`start_tunneld.sh`)が使う `pymobiledevice3` の実行ファイル。設定すると `uv` を使わない |
 | `DEVICE_BRIDGE_CACHE_DIR` | 既知デバイスキャッシュの置き場。未設定なら `~/.device-bridge` |
 | `CODEX_HOME` | カスタムペットを探す Codex のホーム。未設定なら `~/.codex` |
 | `MIHARI_VOICE_MODE` | 音声モード。`bundled`(既定)か `live`。付けると保存した設定より優先される |

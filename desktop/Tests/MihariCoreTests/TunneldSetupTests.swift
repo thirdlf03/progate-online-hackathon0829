@@ -21,6 +21,30 @@ struct TunneldSetupTests {
         #expect(source.contains(#""/we\"ird\\path/scripts/install_tunneld_daemon.sh""#))
     }
 
+    @Test("同梱の pymobiledevice3 を渡すと、環境変数として付けて実行する")
+    func passesBundledPymobiledevice3() {
+        let source = TunneldSetup.installScript(
+            bridgeDirectory: "/repo/bridge",
+            pymobiledevice3Path: "/App.app/Contents/Resources/device-bridge/pymobiledevice3"
+        )
+        #expect(
+            source == "do shell script \"PYMOBILEDEVICE3_PATH="
+                + "'/App.app/Contents/Resources/device-bridge/pymobiledevice3' "
+                + "'/repo/bridge/scripts/install_tunneld_daemon.sh'\" with administrator privileges"
+        )
+    }
+
+    @Test("シングルクォートを含むパスでもシェルの 1 語に収まる")
+    func escapesSingleQuotesInBundledPath() {
+        let source = TunneldSetup.installScript(
+            bridgeDirectory: "/repo/bridge",
+            pymobiledevice3Path: "/it's/pymobiledevice3"
+        )
+        // シェルには '/it'\''s/pymobiledevice3' が渡る。AppleScript リテラルの中なので
+        // バックスラッシュはさらに 1 つ増えて \\ になる。
+        #expect(source.contains(#"PYMOBILEDEVICE3_PATH='/it'\\''s/pymobiledevice3'"#))
+    }
+
     @Test("uninstall も管理者権限で解除スクリプトを実行する")
     func buildsAdminUninstallScript() {
         let source = TunneldSetup.uninstallScript(bridgeDirectory: "/repo/bridge")
@@ -55,7 +79,9 @@ struct TunneldModelTests {
             locator: DaemonLocator(
                 environment: ["DEVICE_BRIDGE_DIR": "/repo/bridge"],
                 isExecutable: { _ in true },
-                directoryExists: { _ in true }
+                directoryExists: { _ in true },
+                // テストバイナリ自身の Resources を同梱物と誤認しないように切る。
+                resourcesPath: nil
             ),
             settleDelay: .zero
         )

@@ -10,6 +10,10 @@
 #   sudo bridge/scripts/install_tunneld_daemon.sh    # 登録して起動
 #   bridge/scripts/uninstall_tunneld_daemon.sh       # やめるとき
 #
+# `PYMOBILEDEVICE3_PATH` に実行できるバイナリを渡すと、uv を使わずにそれを直接
+# 登録する。配布した `Mihari.app` は同梱の `pymobiledevice3` をここに渡すので、
+# ユーザーの Mac に uv も Python も要らない。
+#
 # 確認:
 #   curl -s http://127.0.0.1:49151/                  # tunneld の HTTP API が応答すれば OK
 #   tail -f /var/log/mihari-tunneld.log              # ログ
@@ -36,15 +40,40 @@ find_uv() {
   command -v uv
 }
 
+if [[ -n "${PYMOBILEDEVICE3_PATH:-}" && ! -x "${PYMOBILEDEVICE3_PATH}" ]]; then
+  echo "error: PYMOBILEDEVICE3_PATH が実行できない: ${PYMOBILEDEVICE3_PATH}" >&2
+  exit 1
+fi
+
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "LaunchDaemon の登録には root 権限が必要なため、sudo で再実行する。" >&2
+  if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
+    # 同梱バイナリを渡された場合は uv を一切使わないので、探しに行かない。
+    exec sudo PYMOBILEDEVICE3_PATH="${PYMOBILEDEVICE3_PATH}" "${BASH_SOURCE[0]}"
+  fi
   # sudo 後も呼び出したユーザーの uv を見つけられるよう、HOME 由来の探索結果を引き継ぐ。
   exec sudo UV_PATH="$(find_uv)" "${BASH_SOURCE[0]}"
 fi
 
-UV_BIN="$(find_uv)"
-echo "==> uv: ${UV_BIN}"
-echo "==> bridge: ${BRIDGE_DIR}"
+if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
+  echo "==> pymobiledevice3: ${PYMOBILEDEVICE3_PATH}(同梱バイナリ)"
+  PROGRAM_ARGUMENTS="        <string>${PYMOBILEDEVICE3_PATH}</string>
+        <string>remote</string>
+        <string>tunneld</string>"
+  WORKING_DIRECTORY="$(cd "$(dirname "${PYMOBILEDEVICE3_PATH}")" && pwd)"
+else
+  UV_BIN="$(find_uv)"
+  echo "==> uv: ${UV_BIN}"
+  echo "==> bridge: ${BRIDGE_DIR}"
+  PROGRAM_ARGUMENTS="        <string>${UV_BIN}</string>
+        <string>run</string>
+        <string>--project</string>
+        <string>${BRIDGE_DIR}</string>
+        <string>pymobiledevice3</string>
+        <string>remote</string>
+        <string>tunneld</string>"
+  WORKING_DIRECTORY="${BRIDGE_DIR}"
+fi
 
 # すでに登録済みなら一度外す(再インストールを何度やっても壊れないように)。
 launchctl bootout "system/${LABEL}" 2>/dev/null || true
@@ -58,16 +87,10 @@ cat > "${PLIST}" <<PLIST_EOF
     <string>${LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${UV_BIN}</string>
-        <string>run</string>
-        <string>--project</string>
-        <string>${BRIDGE_DIR}</string>
-        <string>pymobiledevice3</string>
-        <string>remote</string>
-        <string>tunneld</string>
+${PROGRAM_ARGUMENTS}
     </array>
     <key>WorkingDirectory</key>
-    <string>${BRIDGE_DIR}</string>
+    <string>${WORKING_DIRECTORY}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

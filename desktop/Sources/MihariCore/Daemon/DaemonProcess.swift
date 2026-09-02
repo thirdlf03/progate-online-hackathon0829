@@ -41,14 +41,18 @@ public final class DaemonProcess: @unchecked Sendable {
 
     /// 起動して、ポート通知が届くまで待つ。
     public func start(locator: DaemonLocator = DaemonLocator()) async throws -> DaemonAnnouncement {
-        let uv = try locator.uvPath()
-        let bridge = try locator.bridgeDirectory()
-
-        process.executableURL = URL(fileURLWithPath: uv)
-        process.arguments = [
-            "run", "--frozen", "--project", bridge,
-            "device-bridge", "serve", "--token", token,
-        ]
+        switch try locator.resolve() {
+        case .bundled(let directory):
+            // 同梱バイナリは自分が Python ごと抱えているので、間に uv を挟まない。
+            process.executableURL = URL(fileURLWithPath: directory + "/device-bridge")
+            process.arguments = ["serve", "--token", token]
+        case .source(let bridge, let uv):
+            process.executableURL = URL(fileURLWithPath: uv)
+            process.arguments = [
+                "run", "--frozen", "--project", bridge,
+                "device-bridge", "serve", "--token", token,
+            ]
+        }
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
@@ -79,14 +83,15 @@ public final class DaemonProcess: @unchecked Sendable {
     public func terminate() {
         guard process.isRunning else { return }
 
-        let uvPID = process.processIdentifier
+        let childPID = process.processIdentifier
         let pythonPID = announcement.map { Int32($0.pid) }
 
         // stdin を閉じると Python 側が自分から終わる。届かない場合に備えて SIGTERM も送る。
         try? stdinPipe.fileHandleForWriting.close()
         process.terminate()
-        // uv への SIGTERM は uv 止まりのことがある。ポート通知で受け取った Python の
-        // pid にも直接送らないと、子だけが生き残ってポートを掴んだままになる。
+        // uv 経由で起動した場合、SIGTERM が uv 止まりのことがある。ポート通知で受け取った
+        // Python の pid にも直接送らないと、子だけが生き残ってポートを掴んだままになる。
+        // 同梱バイナリなら両者は同じ pid なので、二重に送っても害はない。
         if let pythonPID, pythonPID > 0 {
             kill(pythonPID, SIGTERM)
         }
@@ -99,7 +104,7 @@ public final class DaemonProcess: @unchecked Sendable {
         Self.logger.error(
             "daemon が \(Self.terminationTimeout, privacy: .public) 秒待っても終わらないので強制終了する"
         )
-        kill(uvPID, SIGKILL)
+        kill(childPID, SIGKILL)
         if let pythonPID, pythonPID > 0 {
             kill(pythonPID, SIGKILL)
         }
