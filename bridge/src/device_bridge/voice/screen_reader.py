@@ -167,12 +167,10 @@ class ScreenReader:
         except ScreenReadError as error:
             logger.warning("スクショを読めなかった: %s", error)
             raise
-        logger.info(
-            "画面を読んだ: app=%s category=%s activity=%s",
-            reading.app,
-            reading.category,
-            reading.activity,
-        )
+        # 読み取った中身(activity)は画面の要約そのものなので info には出さない。
+        # bridge の stderr は macOS 側で unified log に平文で転記される。
+        logger.info("画面を読んだ: app=%s category=%s", reading.app, reading.category)
+        logger.debug("画面の見立て: activity=%s", reading.activity)
         return reading
 
     async def _read(

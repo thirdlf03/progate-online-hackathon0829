@@ -84,6 +84,10 @@ Swift の整形設定は `desktop/.swift-format`、Python の設定は `bridge/p
 
 声は冥鳴ひまり(VOICEVOX の speaker 14)で固定。**音声モードが 2 つある。**
 
+音声はすべて [VOICEVOX](https://voicevox.hiroshiba.jp/) の**冥鳴ひまり**で合成している。クレジット表記は **「VOICEVOX:冥鳴ひまり」**。
+[VOICEVOX 利用規約](https://voicevox.hiroshiba.jp/term/)と[冥鳴ひまり利用規約](https://www.meimeihimari.com/terms-of-use)に従うこと。
+同封音声(`.m4a`)を取り出して別のところで使う場合も、同じクレジット表記と規約の遵守が要る。
+
 | モード | セリフ | 音声 | VOICEVOX |
 | --- | --- | --- | --- |
 | `bundled`(既定) | `desktop/Sources/MihariCore/Resources/voice/lines.json` から抽選 | アプリに同封した `.m4a` をそのまま鳴らす | 要らない |
@@ -118,6 +122,9 @@ python3 scripts/generate_voice_lines.py --url http://127.0.0.1:50021
 
 証拠は Discord に投稿する。投稿先のチャンネルは「設定…」(ペットの右クリックメニュー)の
 「Discord」タブから選ぶ。
+
+Bot は `DISCORD_BOT_TOKEN` が設定されていれば、セーフティーの「Discord に晒す」が OFF でもデーモンの起動時に Discord へ接続し、つながったままになる(スラッシュコマンドやチャンネル一覧のため)。
+トグルで止まるのは**投稿だけ**で、接続そのものを切りたいならトークンを外す。
 
 ### 呼びつける相手(メンション)
 
@@ -340,6 +347,10 @@ Gemini に見せて「何のアプリで何をしているか」に触れたセ�
 
 iOS 17+ の developer 系機能を使う場合は、別途 tunneld(root 権限が必要)の起動が必要になる。
 
+カメラの写真や iPhone のスクリーンショットを Discord へ投稿する機能は、**本人が自分を監視するためのもの**。
+同居人や職場など、自分以外の人が写り込む環境では ON にしないこと。
+また、iPhone のスクリーンショットの判定には Google Gemini を使っており、**無料枠で送ったデータは Google の製品改善に使われる場合がある**。
+
 ## アンインストール
 
 「設定」画面(メニューバー「ペット」またはペットの右クリックメニューの最上段、
@@ -353,13 +364,16 @@ iOS 17+ の developer 系機能を使う場合は、別途 tunneld(root 権限�
   UserDefaults、アプリ本体(`Mihari.app` をゴミ箱へ)
 - quitLock が ON のロック中は押せない(終了ブロックの抜け道にしないため)。ロックが解けてからやり直す
 - 失敗した項目があると、1 つずつ理由と手動の手順が表示される
+- **消えないもの**: 既知デバイスの UDID 記録(`~/.device-bridge`)と tunneld のログ(`/var/log/mihari-tunneld.log`、root 所有なので `sudo` が要る)はアンインストーラーの対象外。気になるなら下の手動手順で消す
 
-アプリから消し切れなかった場合の手動手順(表示されるダイアログと同じ内容):
+アプリから消し切れなかった場合の手動手順(`~/.device-bridge` と tunneld のログの 2 行を除き、表示されるダイアログと同じ内容):
 
 ```sh
 launchctl bootout gui/$(id -u)/com.thirdlf03.mihari.watchdog
 sudo launchctl bootout system/com.thirdlf03.mihari.tunneld
 rm -rf ~/.mihari
+rm -rf ~/.device-bridge
+sudo rm -f /var/log/mihari-tunneld.log
 defaults delete com.thirdlf03.mihari
 ```
 
