@@ -116,6 +116,17 @@ if [ "${BUNDLE_BRIDGE:-}" = "1" ]; then
     echo "==> bridge を同梱(${BRIDGE_DIST} → Contents/Resources/device-bridge)"
     ditto "${BRIDGE_DIST}" "${STAGING_APP}/Contents/Resources/device-bridge"
 
+    # tunneld の登録/解除は root でしか出来ないので、アプリからはこのスクリプトを
+    # 管理者パスワードダイアログ経由で叩く。リポジトリの無い Mac でも登録を完結させる
+    # ため、スクリプトも同梱物の中に入れる(TunneldSetup が scripts/ を探す)。
+    echo "==> tunneld のスクリプトを同梱(Contents/Resources/device-bridge/scripts)"
+    mkdir -p "${STAGING_APP}/Contents/Resources/device-bridge/scripts"
+    for script_file in install_tunneld_daemon.sh uninstall_tunneld_daemon.sh start_tunneld.sh; do
+        cp "${BRIDGE_DIR}/scripts/${script_file}" \
+            "${STAGING_APP}/Contents/Resources/device-bridge/scripts/${script_file}"
+        chmod 755 "${STAGING_APP}/Contents/Resources/device-bridge/scripts/${script_file}"
+    done
+
     # 同梱する bridge には GPL-3.0 の pymobiledevice3 が入る。条文と権利表示を
     # バイナリと一緒に配る必要があるため、.app の中に入れておく。
     echo "==> ライセンスを同梱(Contents/Resources/licenses)"

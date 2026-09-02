@@ -4,9 +4,12 @@ import Foundation
 /// 登録スクリプトを組み立てる純粋なロジック。
 ///
 /// tunneld は root でしか動かせないため、アプリからは直接起動できない。
-/// 代わりに `bridge/scripts/install_tunneld_daemon.sh` を macOS の
+/// 代わりに `install_tunneld_daemon.sh` を macOS の
 /// 管理者パスワードダイアログ(`do shell script … with administrator privileges`)
 /// 経由で 1 回実行し、launchd(LaunchDaemon)に常駐を任せる。
+///
+/// スクリプトの置き場は `DaemonLocator.tunneldScripts()` が決める。配布した `.app` なら
+/// 同梱物の `Contents/Resources/device-bridge/scripts/`、リポジトリなら `bridge/scripts/`。
 public enum TunneldSetup {
 
     /// tunneld の HTTP API。ここが応答すれば常駐している。
@@ -17,8 +20,8 @@ public enum TunneldSetup {
     /// `pymobiledevice3Path` を渡すと、スクリプトはそのバイナリを直接 launchd に登録する。
     /// `.app` に同梱した `pymobiledevice3` を使わせるための入口。渡さなければ、
     /// スクリプトは従来どおり自分で `uv` を探して `bridge/` 越しに起動する。
-    public static func installScript(bridgeDirectory: String, pymobiledevice3Path: String? = nil) -> String {
-        let path = bridgeDirectory + "/scripts/install_tunneld_daemon.sh"
+    public static func installScript(scriptsDirectory: String, pymobiledevice3Path: String? = nil) -> String {
+        let path = scriptsDirectory + "/install_tunneld_daemon.sh"
         guard let pymobiledevice3Path else {
             return "do shell script \(appleScriptLiteral(path)) with administrator privileges"
         }
@@ -30,8 +33,9 @@ public enum TunneldSetup {
     ///
     /// `install()` と同じく LaunchDaemon は root しか触れないため、
     /// 管理者パスワードダイアログ経由で `uninstall_tunneld_daemon.sh` を 1 回実行する。
-    public static func uninstallScript(bridgeDirectory: String) -> String {
-        let path = bridgeDirectory + "/scripts/uninstall_tunneld_daemon.sh"
+    /// 解除は `launchctl bootout` と plist の削除だけなので、`pymobiledevice3` は要らない。
+    public static func uninstallScript(scriptsDirectory: String) -> String {
+        let path = scriptsDirectory + "/uninstall_tunneld_daemon.sh"
         return "do shell script \(appleScriptLiteral(path)) with administrator privileges"
     }
 
@@ -112,19 +116,20 @@ public final class TunneldModel: ObservableObject {
         status = .installing
         message = nil
 
-        let bridge: String
+        // 配布した .app なら同梱物、リポジトリなら bridge/scripts/。
+        // 同梱スクリプトには同梱の pymobiledevice3 を渡すので uv が要らない。
+        let scripts: TunneldScriptLocation
         do {
-            bridge = try locator.bridgeDirectory()
+            scripts = try locator.tunneldScripts()
         } catch {
             status = .notRunning
-            message = "bridge/ が見つかりません。DEVICE_BRIDGE_DIR を設定してください"
+            message = "tunneld のスクリプトが見つかりません。DEVICE_BRIDGE_DIR を設定してください"
             return
         }
 
-        // 同梱の pymobiledevice3 があればそれを登録させる。無ければスクリプトが uv を探す。
         let source = TunneldSetup.installScript(
-            bridgeDirectory: bridge,
-            pymobiledevice3Path: locator.bundledPymobiledevice3Path()
+            scriptsDirectory: scripts.scriptsDirectory,
+            pymobiledevice3Path: scripts.pymobiledevice3Path
         )
         let runner = self.runner
         // パスワードダイアログが閉じるまで返ってこない同期呼び出しなので、メインを塞がない。
@@ -158,16 +163,16 @@ public final class TunneldModel: ObservableObject {
         status = .installing
         message = nil
 
-        let bridge: String
+        let scripts: TunneldScriptLocation
         do {
-            bridge = try locator.bridgeDirectory()
+            scripts = try locator.tunneldScripts()
         } catch {
             status = previous
-            message = "bridge/ が見つかりません。DEVICE_BRIDGE_DIR を設定してください"
+            message = "tunneld のスクリプトが見つかりません。DEVICE_BRIDGE_DIR を設定してください"
             return
         }
 
-        let source = TunneldSetup.uninstallScript(bridgeDirectory: bridge)
+        let source = TunneldSetup.uninstallScript(scriptsDirectory: scripts.scriptsDirectory)
         let runner = self.runner
         // パスワードダイアログが閉じるまで返ってこない同期呼び出しなので、メインを塞がない。
         let outcome = await Task.detached { runner.run(source) }.value

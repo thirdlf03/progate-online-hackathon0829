@@ -164,6 +164,58 @@ struct DaemonSourceResolutionTests {
         #expect(locator.bundledPymobiledevice3Path() == nil)
     }
 
+    @Test("同梱スクリプトがあれば、同梱の pymobiledevice3 を添えてそれを使う")
+    func prefersBundledScripts() throws {
+        let locator = bundledLocator(
+            executables: [
+                "/App.app/Contents/Resources/device-bridge/device-bridge",
+                "/App.app/Contents/Resources/device-bridge/pymobiledevice3",
+                "/App.app/Contents/Resources/device-bridge/scripts/install_tunneld_daemon.sh",
+            ]
+        )
+        #expect(
+            try locator.tunneldScripts()
+                == TunneldScriptLocation(
+                    scriptsDirectory: "/App.app/Contents/Resources/device-bridge/scripts",
+                    pymobiledevice3Path: "/App.app/Contents/Resources/device-bridge/pymobiledevice3"
+                )
+        )
+    }
+
+    @Test("同梱にスクリプトが無ければ、リポジトリの bridge/scripts に戻る")
+    func fallsBackToRepositoryScripts() throws {
+        // バイナリだけ同梱してスクリプトを入れ忘れた形。uv 経路のスクリプトを使う。
+        let locator = bundledLocator(
+            executables: [
+                "/App.app/Contents/Resources/device-bridge/device-bridge",
+                "/App.app/Contents/Resources/device-bridge/pymobiledevice3",
+            ]
+        )
+        #expect(
+            try locator.tunneldScripts()
+                == TunneldScriptLocation(
+                    scriptsDirectory: DaemonLocator.repositoryBridgePath + "/scripts",
+                    pymobiledevice3Path: nil
+                )
+        )
+    }
+
+    @Test("DEVICE_BRIDGE_DIR があればスクリプトも手元の bridge/ から採る")
+    func explicitBridgeDirWinsForScripts() throws {
+        let locator = bundledLocator(
+            environment: ["DEVICE_BRIDGE_DIR": "/repo/bridge"],
+            executables: [
+                "/App.app/Contents/Resources/device-bridge/device-bridge",
+                "/App.app/Contents/Resources/device-bridge/pymobiledevice3",
+                "/App.app/Contents/Resources/device-bridge/scripts/install_tunneld_daemon.sh",
+            ]
+        )
+        #expect(
+            try locator.tunneldScripts()
+                == TunneldScriptLocation(scriptsDirectory: "/repo/bridge/scripts", pymobiledevice3Path: nil)
+        )
+    }
+
     @Test("Resources が分からなければ同梱物は無いものとして扱う")
     func noResourcesPathMeansNoBundle() {
         let locator = DaemonLocator(

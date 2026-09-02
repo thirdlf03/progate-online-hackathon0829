@@ -8,11 +8,17 @@
 #
 # 使い方:
 #   sudo bridge/scripts/install_tunneld_daemon.sh    # 登録して起動
+#   bridge/scripts/install_tunneld_daemon.sh --dry-run  # 書き込む plist を出すだけ(root 不要)
 #   bridge/scripts/uninstall_tunneld_daemon.sh       # やめるとき
 #
 # `PYMOBILEDEVICE3_PATH` に実行できるバイナリを渡すと、uv を使わずにそれを直接
-# 登録する。配布した `Mihari.app` は同梱の `pymobiledevice3` をここに渡すので、
-# ユーザーの Mac に uv も Python も要らない。
+# 登録する。指定が無くても、このスクリプトの 1 つ上に `pymobiledevice3` が並んでいれば
+# (配布した `Mihari.app` の Contents/Resources/device-bridge/ がその形)それを使う。
+# どちらでもなければ従来どおり uv を探して `bridge/` 越しに起動する。
+#
+# 既知の制約: LaunchDaemon の plist には実行ファイルの絶対パスが焼き付く。
+# 同梱バイナリを登録した場合、`Mihari.app` を移動・改名すると tunneld が起動しなく
+# なるので、その場合はアプリから登録し直すこと。
 #
 # 確認:
 #   curl -s http://127.0.0.1:49151/                  # tunneld の HTTP API が応答すれば OK
@@ -40,12 +46,23 @@ find_uv() {
   command -v uv
 }
 
-if [[ -n "${PYMOBILEDEVICE3_PATH:-}" && ! -x "${PYMOBILEDEVICE3_PATH}" ]]; then
-  echo "error: PYMOBILEDEVICE3_PATH が実行できない: ${PYMOBILEDEVICE3_PATH}" >&2
-  exit 1
+DRY_RUN=0
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=1
 fi
 
-if [[ "$(id -u)" -ne 0 ]]; then
+if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
+  if [[ ! -x "${PYMOBILEDEVICE3_PATH}" ]]; then
+    echo "error: PYMOBILEDEVICE3_PATH が実行できない: ${PYMOBILEDEVICE3_PATH}" >&2
+    exit 1
+  fi
+elif [[ -x "${BRIDGE_DIR}/pymobiledevice3" ]]; then
+  # 同梱物の中(Contents/Resources/device-bridge/scripts/ の 1 つ上)に並んでいる。
+  # 手で叩いたときも uv を要求しないよう、指定が無ければこれを既定にする。
+  PYMOBILEDEVICE3_PATH="${BRIDGE_DIR}/pymobiledevice3"
+fi
+
+if [[ "$(id -u)" -ne 0 && "${DRY_RUN}" -eq 0 ]]; then
   echo "LaunchDaemon の登録には root 権限が必要なため、sudo で再実行する。" >&2
   if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
     # 同梱バイナリを渡された場合は uv を一切使わないので、探しに行かない。
@@ -56,7 +73,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
-  echo "==> pymobiledevice3: ${PYMOBILEDEVICE3_PATH}(同梱バイナリ)"
+  echo "==> pymobiledevice3: ${PYMOBILEDEVICE3_PATH}"
   PROGRAM_ARGUMENTS="        <string>${PYMOBILEDEVICE3_PATH}</string>
         <string>remote</string>
         <string>tunneld</string>"
@@ -75,10 +92,7 @@ else
   WORKING_DIRECTORY="${BRIDGE_DIR}"
 fi
 
-# すでに登録済みなら一度外す(再インストールを何度やっても壊れないように)。
-launchctl bootout "system/${LABEL}" 2>/dev/null || true
-
-cat > "${PLIST}" <<PLIST_EOF
+PLIST_BODY="$(cat <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -102,6 +116,20 @@ ${PROGRAM_ARGUMENTS}
 </dict>
 </plist>
 PLIST_EOF
+)"
+
+# --dry-run は root を要らず、書き込みも登録もせずに中身だけ見せる。
+# 同梱物が本当に uv 抜きのコマンドラインを吐くかを、登録せずに確かめるためにある。
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  echo "==> --dry-run: ${PLIST} には書き込まない。生成される内容は次のとおり"
+  echo "${PLIST_BODY}"
+  exit 0
+fi
+
+# すでに登録済みなら一度外す(再インストールを何度やっても壊れないように)。
+launchctl bootout "system/${LABEL}" 2>/dev/null || true
+
+printf '%s\n' "${PLIST_BODY}" > "${PLIST}"
 
 # launchd は所有者 root・グループ等の書き込み不可を要求する。
 chown root:wheel "${PLIST}"

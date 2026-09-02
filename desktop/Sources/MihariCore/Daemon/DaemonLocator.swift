@@ -15,6 +15,25 @@ public enum DaemonSource: Equatable, Sendable {
     case source(bridgeDirectory: String, uvPath: String)
 }
 
+/// tunneld の登録/解除スクリプトの置き場と、そこへ渡す `pymobiledevice3`。
+///
+/// tunneld は root でしか起動できないため、アプリからは直接触れず、
+/// スクリプトを管理者パスワードダイアログ越しに 1 回だけ実行する。
+public struct TunneldScriptLocation: Equatable, Sendable {
+
+    /// `install_tunneld_daemon.sh` などが入っているディレクトリ。
+    public let scriptsDirectory: String
+
+    /// スクリプトに `PYMOBILEDEVICE3_PATH` として渡すバイナリ。
+    /// ソース経路なら `nil` で、スクリプトが自分で `uv` を探す。
+    public let pymobiledevice3Path: String?
+
+    public init(scriptsDirectory: String, pymobiledevice3Path: String?) {
+        self.scriptsDirectory = scriptsDirectory
+        self.pymobiledevice3Path = pymobiledevice3Path
+    }
+}
+
 /// デーモンの実体(同梱バイナリ、または `uv` と `bridge/`)の場所を決める。
 ///
 /// 環境変数での上書きを許すのは、リポジトリの外から `.app` を動かす場合に
@@ -78,6 +97,27 @@ public struct DaemonLocator: Sendable {
         guard let directory = bundledDirectory() else { return nil }
         let path = directory + "/pymobiledevice3"
         return isExecutable(path) ? path : nil
+    }
+
+    /// tunneld のスクリプトをどこから実行するか。
+    ///
+    /// 優先順は `resolve()` と揃える(`DEVICE_BRIDGE_DIR` → 同梱 → リポジトリ)。
+    /// 同梱スクリプトを使うときは、同じ同梱物の `pymobiledevice3` を渡すので
+    /// ユーザーの Mac に uv も Python も要らない。
+    public func tunneldScripts() throws -> TunneldScriptLocation {
+        if environment["DEVICE_BRIDGE_DIR"].flatMap({ $0.isEmpty ? nil : $0 }) == nil,
+            let directory = bundledDirectory(),
+            isExecutable(directory + "/scripts/install_tunneld_daemon.sh")
+        {
+            return TunneldScriptLocation(
+                scriptsDirectory: directory + "/scripts",
+                pymobiledevice3Path: bundledPymobiledevice3Path()
+            )
+        }
+        return TunneldScriptLocation(
+            scriptsDirectory: try bridgeDirectory() + "/scripts",
+            pymobiledevice3Path: nil
+        )
     }
 
     /// `uv` の探索順。`UV_PATH` があればそれだけを見る。

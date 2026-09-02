@@ -90,6 +90,7 @@ Swift の整形設定は `desktop/.swift-format`、Python の設定は `bridge/p
 1. `bridge/` を [PyInstaller](https://pyinstaller.org/) で 1 ディレクトリに固める
    (`device-bridge` と `pymobiledevice3` の 2 本。設定は `bridge/device-bridge.spec`)
 2. それを `Mihari.app/Contents/Resources/device-bridge/` に同梱して署名する
+   (tunneld の登録/解除スクリプトも同じ場所の `scripts/` に入れる)
 3. 同梱後のバイナリで `bridge/scripts/smoke_frozen.sh` を回し、`list` / `serve` /
    `pymobiledevice3 --help` が動くことを確かめる
 4. `Mihari-<バージョン>.zip` に固める(バージョンは `Info.plist` の `CFBundleShortVersionString`)
@@ -98,6 +99,14 @@ Swift の整形設定は `desktop/.swift-format`、Python の設定は `bridge/p
 アプリは `Contents/Resources/device-bridge/device-bridge` があればそれを使い、
 無ければ従来どおり `uv` と `bridge/` を探す(`DEVICE_BRIDGE_DIR` を設定した場合は
 同梱物より手元の `bridge/` が優先される。開発中に差し込むための入口)。
+
+tunneld(iOS 17+ のスクショに要る root 常駐)も同梱物だけで完結する。アプリは同梱の
+`scripts/install_tunneld_daemon.sh` を管理者パスワードダイアログ経由で実行し、
+LaunchDaemon には同梱の `pymobiledevice3` を直接登録する(`uv` は挟まない)。
+**ただし plist には実行ファイルの絶対パスが焼き付くので、登録後に `Mihari.app` を
+移動・改名すると tunneld が起動しなくなる。**その場合はアプリから登録し直すこと。
+書き込まれる plist は `bridge/scripts/install_tunneld_daemon.sh --dry-run` で
+root を要らずに確認できる。
 
 同梱する `bridge` には **GPL-3.0 の [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) が
 バイナリとして含まれる**。対応する条文と権利表示を一緒に配る必要があるため、

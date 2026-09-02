@@ -8,7 +8,7 @@ struct TunneldSetupTests {
 
     @Test("install スクリプトを管理者権限で実行する AppleScript を組み立てる")
     func buildsAdminInstallScript() {
-        let source = TunneldSetup.installScript(bridgeDirectory: "/repo/bridge")
+        let source = TunneldSetup.installScript(scriptsDirectory: "/repo/bridge/scripts")
         #expect(
             source == "do shell script \"/repo/bridge/scripts/install_tunneld_daemon.sh\" with administrator privileges"
         )
@@ -16,7 +16,7 @@ struct TunneldSetupTests {
 
     @Test("パスの引用符とバックスラッシュをエスケープする")
     func escapesQuotesInPath() {
-        let source = TunneldSetup.installScript(bridgeDirectory: #"/we"ird\path"#)
+        let source = TunneldSetup.installScript(scriptsDirectory: #"/we"ird\path/scripts"#)
         // AppleScript リテラルの中では、引用符は \" に、バックスラッシュは \\ になる。
         #expect(source.contains(#""/we\"ird\\path/scripts/install_tunneld_daemon.sh""#))
     }
@@ -24,20 +24,21 @@ struct TunneldSetupTests {
     @Test("同梱の pymobiledevice3 を渡すと、環境変数として付けて実行する")
     func passesBundledPymobiledevice3() {
         let source = TunneldSetup.installScript(
-            bridgeDirectory: "/repo/bridge",
+            scriptsDirectory: "/App.app/Contents/Resources/device-bridge/scripts",
             pymobiledevice3Path: "/App.app/Contents/Resources/device-bridge/pymobiledevice3"
         )
         #expect(
             source == "do shell script \"PYMOBILEDEVICE3_PATH="
                 + "'/App.app/Contents/Resources/device-bridge/pymobiledevice3' "
-                + "'/repo/bridge/scripts/install_tunneld_daemon.sh'\" with administrator privileges"
+                + "'/App.app/Contents/Resources/device-bridge/scripts/install_tunneld_daemon.sh'\""
+                + " with administrator privileges"
         )
     }
 
     @Test("シングルクォートを含むパスでもシェルの 1 語に収まる")
     func escapesSingleQuotesInBundledPath() {
         let source = TunneldSetup.installScript(
-            bridgeDirectory: "/repo/bridge",
+            scriptsDirectory: "/repo/bridge/scripts",
             pymobiledevice3Path: "/it's/pymobiledevice3"
         )
         // シェルには '/it'\''s/pymobiledevice3' が渡る。AppleScript リテラルの中なので
@@ -47,7 +48,7 @@ struct TunneldSetupTests {
 
     @Test("uninstall も管理者権限で解除スクリプトを実行する")
     func buildsAdminUninstallScript() {
-        let source = TunneldSetup.uninstallScript(bridgeDirectory: "/repo/bridge")
+        let source = TunneldSetup.uninstallScript(scriptsDirectory: "/repo/bridge/scripts")
         #expect(
             source
                 == "do shell script \"/repo/bridge/scripts/uninstall_tunneld_daemon.sh\" with administrator privileges"

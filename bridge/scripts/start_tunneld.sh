@@ -14,7 +14,8 @@
 # 環境変数の説明と同じ探索順)。
 #
 # `PYMOBILEDEVICE3_PATH` に実行できるバイナリを渡すと、uv を使わずにそれを直接起動する。
-# 配布した `Mihari.app` に同梱した `pymobiledevice3` を指すために使う。
+# 指定が無くても、このスクリプトの 1 つ上に `pymobiledevice3` が並んでいれば
+# (配布した `Mihari.app` の Contents/Resources/device-bridge/ がその形)それを使う。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,11 +37,17 @@ find_uv() {
 }
 
 if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
-  # 同梱バイナリを渡された場合は uv を一切使わない。
   if [[ ! -x "${PYMOBILEDEVICE3_PATH}" ]]; then
     echo "error: PYMOBILEDEVICE3_PATH が実行できない: ${PYMOBILEDEVICE3_PATH}" >&2
     exit 1
   fi
+elif [[ -x "${BRIDGE_DIR}/pymobiledevice3" ]]; then
+  # 同梱物の中(Contents/Resources/device-bridge/scripts/ の 1 つ上)に並んでいる。
+  PYMOBILEDEVICE3_PATH="${BRIDGE_DIR}/pymobiledevice3"
+fi
+
+# 同梱バイナリが決まった場合は uv を一切使わない。
+if [[ -n "${PYMOBILEDEVICE3_PATH:-}" ]]; then
   if [[ "$(id -u)" -ne 0 ]]; then
     echo "tunneld は root 権限が必要なため、sudo で再実行する。" >&2
     exec sudo "${PYMOBILEDEVICE3_PATH}" remote tunneld
