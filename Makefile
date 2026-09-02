@@ -24,8 +24,12 @@ run:
 
 # 配布用。bridge を PyInstaller で固めて .app に同梱し、同梱後のバイナリが本当に
 # 動くことを確かめてから zip にする。受け取った人の Mac に uv も Python も要らない。
+#
+# 署名は既定で ad-hoc(-)。build.sh の証明書自動検出に任せると、Apple Development 証明書の
+# CN に入っている開発者の Apple ID メールアドレスが、配布物から codesign -dvv で誰にでも
+# 読めてしまうため。CODESIGN_IDENTITY を明示して呼べばそちらが優先される。
 dist:
-	cd desktop && BUNDLE_BRIDGE=1 ./build.sh
+	cd desktop && BUNDLE_BRIDGE=1 CODESIGN_IDENTITY="$${CODESIGN_IDENTITY:--}" ./build.sh
 	./bridge/scripts/smoke_frozen.sh "$(CURDIR)/desktop/Mihari.app/Contents/Resources/device-bridge"
 	@version="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' desktop/Resources/Info.plist)"; \
 		rm -f "Mihari-$$version.zip"; \
