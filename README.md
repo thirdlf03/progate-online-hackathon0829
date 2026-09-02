@@ -104,7 +104,7 @@ make dist    # 配布用の Mihari.app を作る(受け取る側に uv も Pytho
 | `setup` | `cd bridge && uv sync` |
 | `fmt` | `swift format --in-place` と `ruff format` / `ruff check --fix` |
 | `lint` | `swift format lint --strict` と `ruff check` / `ruff format --check` |
-| `build` | `cd desktop && ./build.sh`(`Mihari.app` を組み立てて ad-hoc 署名する) |
+| `build` | `cd desktop && ./build.sh`(`Mihari.app` を組み立てて署名する。証明書を自動検出し、無ければ ad-hoc) |
 | `run` | `cd desktop && ./run.sh`(ビルドして `Mihari.app` を起動する) |
 | `dist` | `bridge` を PyInstaller で固めて `Mihari.app` に同梱し、`Mihari-<バージョン>.zip` にする(下記) |
 | `test` | `cd desktop && swift test` と `cd bridge && uv run pytest` |

@@ -212,7 +212,8 @@ desktop/
 
 ## 署名について
 
-ローカル実機検証専用。Developer ID による署名・公証はしておらず、配布は想定していない。
+Developer ID による署名も公証もしていない。配布はルートの `make dist` が作る **ad-hoc 署名の zip**
+で行う（受け取る側の初回起動の手順はルート [README の「インストール」](../README.md#インストール)）。
 `build.sh` は次の順で署名に使う identity を決め、どれを使ったかを必ず 1 行出力する。
 
 1. 環境変数 `CODESIGN_IDENTITY` が設定されていればそれを使う（`security find-identity -v -p codesigning`
