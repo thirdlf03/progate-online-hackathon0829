@@ -1,8 +1,10 @@
 [project]
 name = "device-bridge"
 version = "0.1.0"
-description = "macOS アプリから起動される iOS デバイス情報取得 CLI"
+description = "Mihari の Python 側デーモン — iPhone の状態取得・スクショ、Discord Bot、Gemini 判定、VOICEVOX 連携"
 requires-python = ">=3.13"
+license = "GPL-3.0-or-later"
+authors = [{ name = "thirdlf03" }]
 dependencies = [
     "pymobiledevice3>=11.1.6",
     "fastapi>=0.115.0",

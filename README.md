@@ -379,3 +379,12 @@ defaults delete com.thirdlf03.mihari
 
 `make kill` は開発中に起動中のプロセスを止めるだけのもので、常駐の登録
 (LaunchAgent / LaunchDaemon / ログイン項目)は残る。アンインストールには使わない。
+
+## ライセンス
+
+場所によってライセンスが違う。詳細と権利表示は [`NOTICE.md`](NOTICE.md) を参照。
+
+- リポジトリ全体(下記の例外を除く): MIT([`LICENSE`](LICENSE))
+- `bridge/`: GPL-3.0-or-later([`bridge/LICENSE`](bridge/LICENSE))。GPL-3.0 の pymobiledevice3 を import する派生物のため
+- `desktop/Sources/MihariCore/Resources/voice/`: MIT の対象外。VOICEVOX と冥鳴ひまりの利用規約に従う(クレジット表記は「VOICEVOX:冥鳴ひまり」)
+- `desktop/Sources/MihariCore/Resources/pets/`: MIT の対象外。AI 生成画像で、CC0 1.0(権利主張しない)
