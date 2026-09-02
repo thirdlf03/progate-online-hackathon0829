@@ -28,9 +28,35 @@ from dotenv import load_dotenv
 
 from device_bridge.daemon.app import create_app
 from device_bridge.daemon.config import DaemonConfig
+from device_bridge.settings_paths import settings_directory
 
 #: 出力が多くて肝心のログが埋もれるライブラリ。WARNING 以上だけ残す。
 _NOISY_LOGGERS = ("httpx", "httpcore", "google_genai", "discord")
+
+#: 認証情報などを置くファイル名。設定ディレクトリと bridge/ の両方でこの名前を使う。
+ENV_FILE = ".env"
+
+#: 開発用の .env。リポジトリの bridge/ 直下。
+BRIDGE_ENV_PATH = Path(__file__).resolve().parents[3] / ENV_FILE
+
+
+def load_env(
+    settings_dir: Path | None = None,
+    bridge_env: Path | None = None,
+) -> None:
+    """API キーなどを .env から読む。無くても起動する(セリフが固定文言になるだけ)。
+
+    優先順位は「実環境変数 > 設定ディレクトリの .env > bridge/.env」。どちらも
+    ``override=False`` で読むので、先に os.environ にある値が勝つ。
+
+    アプリの設定画面が書くのは設定ディレクトリの方。開発用の bridge/.env より先に
+    読むことで、「画面から入れたのに古い bridge/.env が効き続ける」事故を防ぐ。
+
+    引数はテスト用。既定では ``MIHARI_SETTINGS_DIR``(無ければ ``~/.mihari``)と
+    リポジトリの bridge/.env を見る。
+    """
+    load_dotenv(settings_directory(settings_dir) / ENV_FILE, override=False)
+    load_dotenv(bridge_env or BRIDGE_ENV_PATH, override=False)
 
 
 def _configure_logging() -> None:
@@ -101,8 +127,7 @@ def _exit_when_stdin_closes(server: uvicorn.Server) -> None:
 def serve(config: DaemonConfig, *, watch_stdin: bool = True) -> None:
     """デーモンを起動し、終了するまでブロックする。"""
     _configure_logging()
-    # API キーなどは bridge/.env から読む。無くても起動する(セリフが固定文言になるだけ)。
-    load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+    load_env()
 
     sock = _bind_socket(config)
     port = sock.getsockname()[1]

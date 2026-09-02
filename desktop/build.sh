@@ -16,6 +16,11 @@
 #   2. キーチェーンにある最初の Apple Development 証明書(自動検出)
 #   3. どちらも無ければ ad-hoc(-)
 #
+# BUNDLE_BRIDGE=1 を付けると、PyInstaller で固めた bridge(device-bridge と
+# pymobiledevice3)を Contents/Resources/device-bridge/ に同梱する。この形なら
+# 配る相手の Mac に uv も Python も要らない。既定では同梱しない(開発中は
+# リポジトリの bridge/ を uv 越しに使うため)。配布物を作るならルートの `make dist`。
+#
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -91,6 +96,46 @@ if [ ! -d "${BUNDLE_PATH}" ]; then
 fi
 cp -R "${BUNDLE_PATH}" "${STAGING_APP}/Contents/Resources/${BUNDLE_NAME}"
 
+# BUNDLE_BRIDGE=1 のときだけ、PyInstaller で固めた bridge を同梱する。
+# DaemonLocator が Contents/Resources/device-bridge/device-bridge を探すので、
+# この名前と場所を変えてはいけない。
+if [ "${BUNDLE_BRIDGE:-}" = "1" ]; then
+    BRIDGE_DIR="$(cd .. && pwd)/bridge"
+    BRIDGE_DIST="${BRIDGE_DIR}/dist/device-bridge"
+
+    if [ ! -x "${BRIDGE_DIST}/device-bridge" ]; then
+        echo "==> bridge を PyInstaller で固める(未ビルドのため)"
+        (cd "${BRIDGE_DIR}" && uv run --group dist pyinstaller --noconfirm device-bridge.spec)
+    fi
+    if [ ! -x "${BRIDGE_DIST}/device-bridge" ] || [ ! -x "${BRIDGE_DIST}/pymobiledevice3" ]; then
+        echo "error: 同梱するバイナリが揃っていない: ${BRIDGE_DIST}" >&2
+        exit 1
+    fi
+
+    # symlink と Python.framework を含むので、cp ではなく ditto で写す。
+    echo "==> bridge を同梱(${BRIDGE_DIST} → Contents/Resources/device-bridge)"
+    ditto "${BRIDGE_DIST}" "${STAGING_APP}/Contents/Resources/device-bridge"
+
+    # tunneld の登録/解除は root でしか出来ないので、アプリからはこのスクリプトを
+    # 管理者パスワードダイアログ経由で叩く。リポジトリの無い Mac でも登録を完結させる
+    # ため、スクリプトも同梱物の中に入れる(TunneldSetup が scripts/ を探す)。
+    echo "==> tunneld のスクリプトを同梱(Contents/Resources/device-bridge/scripts)"
+    mkdir -p "${STAGING_APP}/Contents/Resources/device-bridge/scripts"
+    for script_file in install_tunneld_daemon.sh uninstall_tunneld_daemon.sh start_tunneld.sh; do
+        cp "${BRIDGE_DIR}/scripts/${script_file}" \
+            "${STAGING_APP}/Contents/Resources/device-bridge/scripts/${script_file}"
+        chmod 755 "${STAGING_APP}/Contents/Resources/device-bridge/scripts/${script_file}"
+    done
+
+    # 同梱する bridge には GPL-3.0 の pymobiledevice3 が入る。条文と権利表示を
+    # バイナリと一緒に配る必要があるため、.app の中に入れておく。
+    echo "==> ライセンスを同梱(Contents/Resources/licenses)"
+    mkdir -p "${STAGING_APP}/Contents/Resources/licenses"
+    for license_file in LICENSE LICENSE-GPL-3.0 NOTICE.md; do
+        cp "../${license_file}" "${STAGING_APP}/Contents/Resources/licenses/${license_file}"
+    done
+fi
+
 # 署名に使う identity を決める。
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
     SIGN_IDENTITY="${CODESIGN_IDENTITY}"
@@ -116,7 +161,8 @@ codesign --force --deep --sign "${SIGN_IDENTITY}" \
     "${STAGING_APP}"
 
 echo "==> 署名の検証"
-codesign --verify --strict "${STAGING_APP}"
+# 同梱した bridge の中身(PyInstaller が ad-hoc 署名した dylib 群)まで見るため --deep を付ける。
+codesign --verify --strict --deep "${STAGING_APP}"
 codesign -dv --entitlements - "${STAGING_APP}" 2>&1 | sed 's/^/    /'
 
 # TCC がアプリを同一視する根拠。証明書署名なら Team ID を含む要件、ad-hoc なら cdhash になる。

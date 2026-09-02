@@ -1,9 +1,10 @@
-.PHONY: help setup fmt lint lint-swift lint-python build test test-swift test-python run kill clean
+.PHONY: help setup fmt lint lint-swift lint-python build dist test test-swift test-python run kill clean
 
 help:
 	@echo "make setup         - bridge/ の Python 依存を同期する(初回セットアップ)"
 	@echo "make build         - Mihari.app をビルドして署名する(証明書があれば使う。desktop/README.md 参照)"
 	@echo "make run           - Mihari.app をビルドして起動する"
+	@echo "make dist          - 配布用の Mihari.app(bridge 同梱・uv 不要)を作って zip に固める"
 	@echo "make kill          - 起動中の Mihari と監視プロセス(watchdog)を止める"
 	@echo "make test          - Swift / Python のテストを実行する"
 	@echo "                     (test-swift / test-python で片側だけ実行できる)"
@@ -20,6 +21,21 @@ build:
 
 run:
 	cd desktop && ./run.sh
+
+# 配布用。bridge を PyInstaller で固めて .app に同梱し、同梱後のバイナリが本当に
+# 動くことを確かめてから zip にする。受け取った人の Mac に uv も Python も要らない。
+#
+# 署名は既定で ad-hoc(-)。build.sh の証明書自動検出に任せると、Apple Development 証明書の
+# CN に入っている開発者の Apple ID メールアドレスが、配布物から codesign -dvv で誰にでも
+# 読めてしまうため。CODESIGN_IDENTITY を明示して呼べばそちらが優先される。
+dist:
+	cd desktop && BUNDLE_BRIDGE=1 CODESIGN_IDENTITY="$${CODESIGN_IDENTITY:--}" ./build.sh
+	./bridge/scripts/smoke_frozen.sh "$(CURDIR)/desktop/Mihari.app/Contents/Resources/device-bridge"
+	@version="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' desktop/Resources/Info.plist)"; \
+		rm -f "Mihari-$$version.zip"; \
+		ditto -c -k --keepParent desktop/Mihari.app "Mihari-$$version.zip"; \
+		echo ""; \
+		echo "==> 生成物: $(CURDIR)/Mihari-$$version.zip"
 
 kill:
 	cd desktop && ./kill.sh

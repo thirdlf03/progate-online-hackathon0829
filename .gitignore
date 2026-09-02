@@ -17,6 +17,11 @@ dist/
 
 # Mihari
 desktop/Mihari.app/
+Mihari-*.zip
+
+# PyInstaller(配布用 .app に同梱する bridge のバイナリ)
+bridge/build/
+bridge/dist/
 
 # 秘密情報
 bridge/.env

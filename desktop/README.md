@@ -212,7 +212,8 @@ desktop/
 
 ## 署名について
 
-ローカル実機検証専用。Developer ID による署名・公証はしておらず、配布は想定していない。
+Developer ID による署名も公証もしていない。配布はルートの `make dist` が作る **ad-hoc 署名の zip**
+で行う（受け取る側の初回起動の手順はルート [README の「インストール」](../README.md#インストール)）。
 `build.sh` は次の順で署名に使う identity を決め、どれを使ったかを必ず 1 行出力する。
 
 1. 環境変数 `CODESIGN_IDENTITY` が設定されていればそれを使う（`security find-identity -v -p codesigning`
@@ -221,6 +222,13 @@ desktop/
 2. 未設定なら、キーチェーンにある最初の **Apple Development 証明書**を自動検出して使う
    （同名の証明書が複数あっても一意に決まるよう、名前ではなく SHA-1 ハッシュを渡している）
 3. どちらも無ければ従来どおり **ad-hoc**（`codesign --sign -`）で署名し、stderr に警告を 1 行出す
+
+`make build` / `make run` はこの自動検出に任せる（TCC の許可が持続して開発が楽なため）。
+**配布物を作る `make dist` だけは、`CODESIGN_IDENTITY` が未指定なら明示的に ad-hoc（`-`）を渡す。**
+自動検出に任せると、Apple Development 証明書の CN に入っている開発者の Apple ID メールアドレスが、
+配ってしまった `.app` から `codesign -dvv` で誰にでも読めてしまうため。
+`CODESIGN_IDENTITY=… make dist` と明示すればそちらが優先される（既定の指定はルートの `Makefile` の
+`dist` ターゲットにある）。
 
 Hardened Runtime（`--options runtime`）は付けていない。付けるとカメラなどのデバイス権限に
 `com.apple.security.device.*` の entitlements が別途必要になるため。

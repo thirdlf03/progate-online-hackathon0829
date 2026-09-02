@@ -477,12 +477,21 @@ public struct SafetyModeView: View {
             }
         case .settings(let onClose):
             HStack {
+                voiceCredit
                 Spacer()
                 uninstallSection
                 Button("閉じる", action: onClose)
                     .controlSize(.large)
             }
         }
+    }
+
+    /// 同封音声・live 合成のどちらも VOICEVOX の冥鳴ひまりなので、規約が求める
+    /// クレジットをアプリ内にも出す。設定画面のフッターの左端に置く。
+    private var voiceCredit: some View {
+        Text("音声: VOICEVOX:冥鳴ひまり")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     /// 設定画面の「Mihari をアンインストール…」。フッターの「閉じる」の左に出す。#55

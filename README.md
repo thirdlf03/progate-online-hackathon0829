@@ -57,6 +57,36 @@ bridge/src/device_bridge/
 └── commands/devices.py       # pymobiledevice3 呼び出し
 ```
 
+## インストール
+
+GitHub Releases の配布 zip から入れる手順。**受け取る側の Mac に uv も Python も要らない。**
+
+**対象は Apple Silicon(arm64)の macOS 14 以降。**同梱している bridge のバイナリが arm64 のみのため、
+Intel Mac では動かない。Intel Mac の場合と、開発する場合は下の「使い方」からソースでビルドすること。
+
+1. [Releases](https://github.com/thirdlf03/progate-online-hackathon0829/releases) から
+   `Mihari-<バージョン>.zip` をダウンロードする
+2. 展開して、出てきた `Mihari.app` をアプリケーションフォルダへ移す
+3. **初回はダブルクリックでは開けない。**署名が ad-hoc で公証もしていないため Gatekeeper に止められる。
+   次のどちらかで開く。
+   - `Mihari.app` を**右クリック →「開く」**、出てくる確認ダイアログでもう一度**「開く」**
+   - 一度ダブルクリックして拒否されたあと、**システム設定 → プライバシーとセキュリティ**を開き、
+     下のほうに出る**「このまま開く」**を押す(この表示が出るのは拒否されてから 1 時間ほど)
+4. 二回目以降はふつうにダブルクリックで起動する
+
+初回起動で「権限の確認」ウィンドウが出るので、使う機能に要る権限を許可する。
+既定は全機能 OFF(セーフティー)なので、使うものだけ設定から ON にする。
+
+**アップデート(新しい zip への差し替え)のたびに、カメラなどの許可を取り直しになる。**
+ad-hoc 署名では macOS がアプリの同一性をコードのハッシュ(cdhash)で見ており、中身が変わると
+別のアプリと見なされるため。システム設定の一覧では ON のままなのに実際のチェックだけ拒否される、
+という分かりにくい壊れ方をするので、入れ替えたら一度許可を外して取り直すこと
+(理由の詳細は [desktop/README.md の「署名について」](desktop/README.md#署名について))。
+
+iPhone のスクリーンショットを使うなら tunneld の登録が要る。**登録する plist には `Mihari.app` の
+絶対パスが焼き付く**ので、登録後に `.app` を移動・改名したらアプリから登録し直すこと
+(下の「配布用のビルド(`make dist`)」も参照)。
+
 ## 使い方
 
 ルートの `Makefile` からまとめて実行する。`make` だけで各ターゲットの一覧が出る。
@@ -66,6 +96,7 @@ make setup   # bridge/ の Python 依存を同期する(初回のみ)
 make run     # macOS アプリを起動する
 make fmt     # Swift / Python を整形する
 make lint    # フォーマットと lint を検査する
+make dist    # 配布用の Mihari.app を作る(受け取る側に uv も Python も要らない)
 ```
 
 | ターゲット | 内容 |
@@ -73,16 +104,52 @@ make lint    # フォーマットと lint を検査する
 | `setup` | `cd bridge && uv sync` |
 | `fmt` | `swift format --in-place` と `ruff format` / `ruff check --fix` |
 | `lint` | `swift format lint --strict` と `ruff check` / `ruff format --check` |
-| `build` | `cd desktop && ./build.sh`(`Mihari.app` を組み立てて ad-hoc 署名する) |
+| `build` | `cd desktop && ./build.sh`(`Mihari.app` を組み立てて署名する。証明書を自動検出し、無ければ ad-hoc) |
 | `run` | `cd desktop && ./run.sh`(ビルドして `Mihari.app` を起動する) |
+| `dist` | `bridge` を PyInstaller で固めて `Mihari.app` に同梱し、`Mihari-<バージョン>.zip` にする(下記) |
 | `test` | `cd desktop && swift test` と `cd bridge && uv run pytest` |
 | `clean` | `rm -rf desktop/.build desktop/Mihari.app` |
 
 Swift の整形設定は `desktop/.swift-format`、Python の設定は `bridge/pyproject.toml` の `[tool.ruff]` にある。
 
+### 配布用のビルド(`make dist`)
+
+`make build` で作る `Mihari.app` は、Python 側のデーモン(`bridge/`)を動かすのに
+リポジトリと `uv` を必要とする。**`make dist` はそこを切り離す。**
+
+1. `bridge/` を [PyInstaller](https://pyinstaller.org/) で 1 ディレクトリに固める
+   (`device-bridge` と `pymobiledevice3` の 2 本。設定は `bridge/device-bridge.spec`)
+2. それを `Mihari.app/Contents/Resources/device-bridge/` に同梱して署名する
+   (tunneld の登録/解除スクリプトも同じ場所の `scripts/` に入れる)
+3. 同梱後のバイナリで `bridge/scripts/smoke_frozen.sh` を回し、`list` / `serve` /
+   `pymobiledevice3 --help` が動くことを確かめる
+4. `Mihari-<バージョン>.zip` に固める(バージョンは `Info.plist` の `CFBundleShortVersionString`)
+
+出来上がった `.app` は、**受け取った人の Mac に uv も Python も要らない。**
+アプリは `Contents/Resources/device-bridge/device-bridge` があればそれを使い、
+無ければ従来どおり `uv` と `bridge/` を探す(`DEVICE_BRIDGE_DIR` を設定した場合は
+同梱物より手元の `bridge/` が優先される。開発中に差し込むための入口)。
+
+tunneld(iOS 17+ のスクショに要る root 常駐)も同梱物だけで完結する。アプリは同梱の
+`scripts/install_tunneld_daemon.sh` を管理者パスワードダイアログ経由で実行し、
+LaunchDaemon には同梱の `pymobiledevice3` を直接登録する(`uv` は挟まない)。
+**ただし plist には実行ファイルの絶対パスが焼き付くので、登録後に `Mihari.app` を
+移動・改名すると tunneld が起動しなくなる。**その場合はアプリから登録し直すこと。
+書き込まれる plist は `bridge/scripts/install_tunneld_daemon.sh --dry-run` で
+root を要らずに確認できる。
+
+同梱する `bridge` には **GPL-3.0 の [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) が
+バイナリとして含まれる**。対応する条文と権利表示を一緒に配る必要があるため、
+`Contents/Resources/licenses/` に [`LICENSE`](LICENSE)・[`LICENSE-GPL-3.0`](LICENSE-GPL-3.0)・
+[`NOTICE.md`](NOTICE.md) の 3 つを入れてある。zip を再配布するときもこの 3 つを外さないこと。
+
 ## 音声
 
 声は冥鳴ひまり(VOICEVOX の speaker 14)で固定。**音声モードが 2 つある。**
+
+音声はすべて [VOICEVOX](https://voicevox.hiroshiba.jp/) の**冥鳴ひまり**で合成している。クレジット表記は **「VOICEVOX:冥鳴ひまり」**。
+[VOICEVOX 利用規約](https://voicevox.hiroshiba.jp/term/)と[冥鳴ひまり利用規約](https://www.meimeihimari.com/terms-of-use)に従うこと。
+同封音声(`.m4a`)を取り出して別のところで使う場合も、同じクレジット表記と規約の遵守が要る。
 
 | モード | セリフ | 音声 | VOICEVOX |
 | --- | --- | --- | --- |
@@ -119,6 +186,29 @@ python3 scripts/generate_voice_lines.py --url http://127.0.0.1:50021
 証拠は Discord に投稿する。投稿先のチャンネルは「設定…」(ペットの右クリックメニュー)の
 「Discord」タブから選ぶ。
 
+Bot は `DISCORD_BOT_TOKEN` が設定されていれば、セーフティーの「Discord に晒す」が OFF でもデーモンの起動時に Discord へ接続し、つながったままになる(スラッシュコマンドやチャンネル一覧のため)。
+トグルで止まるのは**投稿だけ**で、接続そのものを切りたいならトークンを外す。
+
+### 認証情報(自分の Bot と API キー)
+
+Bot トークンと Gemini の API キーは配布物に同梱できないので、各自で用意する。同じ「Discord」タブの
+「認証情報」に入れて「保存してデーモンを再起動」を押すと、`~/.mihari/.env`(`MIHARI_SETTINGS_DIR` を
+設定していればそのディレクトリ)に**本人だけが読める権限**で書き込み、新しい値でデーモンをつなぎ直す。
+入れた値は画面に出さない(出るのは「設定済み / 未設定」だけ)。キーごとの「削除」で外せる。
+
+Discord Bot の作り方:
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) で **New Application**
+2. 「General Information」の **APPLICATION ID** を `DISCORD_CLIENT_ID` に入れる
+3. 「Bot」タブで **Reset Token** して、出てきたトークンを `DISCORD_BOT_TOKEN` に入れる
+4. 「招待 URL を開く」から自分のサーバに Bot を入れる
+
+Gemini の API キーは [Google AI Studio](https://aistudio.google.com/apikey) で作る。未設定でもアプリは
+動く(iPhone の画面を読まなくなり、セリフが同梱の固定文言になるだけ)。
+
+開発中は `bridge/.env` に直接書いてもよい。読む順は**実環境変数 > `~/.mihari/.env` > `bridge/.env`**
+なので、画面から保存した値の方が `bridge/.env` より優先される。
+
 ### 呼びつける相手(メンション)
 
 同じ画面の「メンション先」に Discord のユーザー ID を入れて「保存」を押すと、投稿の先頭に
@@ -137,11 +227,6 @@ ID の調べ方:
 1 行目で「何をしていたか」を言い、2 行目(Discord の小文字表示)に事実を並べる。
 iPhone の画面を撮れたときは、そこに映っていたアプリと大まかな内容に触れる。
 全パターンは [docs/pet.md](docs/pet.md) の「Discord の文面」にある。
-
-### リリース時の別課題
-
-`DISCORD_BOT_TOKEN`（Bot トークン）を誰が持つか——配布物に同梱するか、各ユーザーが自分の
-Bot を作るか——は未定。認証情報なのでコミットはせず、リリース時に決める。
 
 ## bridge
 
@@ -349,7 +434,8 @@ Gemini に見せて「何のアプリで何をしているか」に触れたセ�
 | 変数 | 用途 |
 | --- | --- |
 | `UV_PATH` | `uv` の実行ファイルパス。未設定なら `~/.local/bin/uv`, `/opt/homebrew/bin/uv`, `/usr/local/bin/uv` の順に探索する |
-| `DEVICE_BRIDGE_DIR` | `bridge/` のパス。未設定ならソース位置からリポジトリルートを逆算して `<root>/bridge` を使う |
+| `DEVICE_BRIDGE_DIR` | `bridge/` のパス。設定すると `.app` に同梱したバイナリより優先される。未設定で同梱も無ければ、ソース位置からリポジトリルートを逆算して `<root>/bridge` を使う |
+| `PYMOBILEDEVICE3_PATH` | tunneld の登録/起動スクリプト(`bridge/scripts/install_tunneld_daemon.sh`・`start_tunneld.sh`)が使う `pymobiledevice3` の実行ファイル。設定すると `uv` を使わない |
 | `DEVICE_BRIDGE_CACHE_DIR` | 既知デバイスキャッシュの置き場。未設定なら `~/.device-bridge` |
 | `CODEX_HOME` | カスタムペットを探す Codex のホーム。未設定なら `~/.codex` |
 | `MIHARI_VOICE_MODE` | 音声モード。`bundled`(既定)か `live`。付けると保存した設定より優先される |
@@ -357,6 +443,10 @@ Gemini に見せて「何のアプリで何をしているか」に触れたセ�
 ## 注意
 
 iOS 17+ の developer 系機能を使う場合は、別途 tunneld(root 権限が必要)の起動が必要になる。
+
+カメラの写真や iPhone のスクリーンショットを Discord へ投稿する機能は、**本人が自分を監視するためのもの**。
+同居人や職場など、自分以外の人が写り込む環境では ON にしないこと。
+また、iPhone のスクリーンショットの判定には Google Gemini を使っており、**無料枠で送ったデータは Google の製品改善に使われる場合がある**。
 
 ## アンインストール
 
@@ -371,15 +461,27 @@ iOS 17+ の developer 系機能を使う場合は、別途 tunneld(root 権限�
   UserDefaults、アプリ本体(`Mihari.app` をゴミ箱へ)
 - quitLock が ON のロック中は押せない(終了ブロックの抜け道にしないため)。ロックが解けてからやり直す
 - 失敗した項目があると、1 つずつ理由と手動の手順が表示される
+- **消えないもの**: 既知デバイスの UDID 記録(`~/.device-bridge`)と tunneld のログ(`/var/log/mihari-tunneld.log`、root 所有なので `sudo` が要る)はアンインストーラーの対象外。気になるなら下の手動手順で消す
 
-アプリから消し切れなかった場合の手動手順(表示されるダイアログと同じ内容):
+アプリから消し切れなかった場合の手動手順(`~/.device-bridge` と tunneld のログの 2 行を除き、表示されるダイアログと同じ内容):
 
 ```sh
 launchctl bootout gui/$(id -u)/com.thirdlf03.mihari.watchdog
 sudo launchctl bootout system/com.thirdlf03.mihari.tunneld
 rm -rf ~/.mihari
+rm -rf ~/.device-bridge
+sudo rm -f /var/log/mihari-tunneld.log
 defaults delete com.thirdlf03.mihari
 ```
 
 `make kill` は開発中に起動中のプロセスを止めるだけのもので、常駐の登録
 (LaunchAgent / LaunchDaemon / ログイン項目)は残る。アンインストールには使わない。
+
+## ライセンス
+
+場所によってライセンスが違う。詳細と権利表示は [`NOTICE.md`](NOTICE.md) を参照。
+
+- リポジトリ全体(下記の例外を除く): MIT([`LICENSE`](LICENSE))
+- `bridge/`: GPL-3.0-or-later([`bridge/LICENSE`](bridge/LICENSE))。GPL-3.0 の pymobiledevice3 を import する派生物のため
+- `desktop/Sources/MihariCore/Resources/voice/`: MIT の対象外。VOICEVOX と冥鳴ひまりの利用規約に従う(クレジット表記は「VOICEVOX:冥鳴ひまり」)
+- `desktop/Sources/MihariCore/Resources/pets/`: MIT の対象外。AI 生成画像で、CC0 1.0(権利主張しない)

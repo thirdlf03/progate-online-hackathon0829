@@ -45,15 +45,17 @@ public enum SafetyFeature: String, CaseIterable, Codable, Sendable, Hashable {
         case .macCamera:
             return "サボりが確定したときにカメラで 1 枚撮ります。写真はこの Mac の中で判定し、撮影後すぐ削除します"
         case .iphonePresence:
-            return "iPhone を触っているか(画面の点灯・操作中)だけを見ます。画面の中身は見ません"
+            return "iPhone を触っているか(画面の点灯・操作中)と、開いているアプリの名前を見ます。画面の中身は見ません"
         case .iphoneScreenshot:
             return "サボりが確定したときに iPhone の画面を撮ります"
         case .discordExposure:
-            return "サボりが確定したとき・逃げたとき・戻ってきたときに Discord へ投稿します。写真や画面を撮る設定が OFF なら文面だけです"
+            return
+                "サボりが確定したとき・逃げたとき・戻ってきたときに Discord へ投稿します。写真や画面を撮る設定が OFF なら文面だけです。Bot トークンを設定していると、OFF のあいだも Discord への接続だけは保ちます(投稿はしません)"
         case .sermonTakeover:
             return "サボりが確定したとき、再生中の音楽を止めて全画面で説教します。既定 90 秒(最長 300 秒)で必ず解除されます"
         case .quitLock:
-            return "アプリを起動した瞬間から、決めた時間(既定 4 時間)は終了できなくなります。Mac はスリープしませんが画面は消えます"
+            return
+                "アプリを起動した瞬間から、決めた時間(既定 4 時間)は終了できなくなります。終了させないために、常駐の見張り(LaunchAgent)とログイン項目を登録し、終了シグナル(SIGTERM/SIGINT)も無視して、20 秒ごとに登録を貼り直します。登録は OFF にしたとき、または時間が切れてから終了したときに解除します。Mac はスリープしませんが画面は消えます"
         case .photobomb:
             return "あなたが撮ったスクリーンショットに、あとからペットを描き足して上書き保存します"
         }
@@ -65,7 +67,8 @@ public enum SafetyFeature: String, CaseIterable, Codable, Sendable, Hashable {
         case .macCamera:
             return "Discord(「Discord に晒す」が ON のとき)"
         case .iphonePresence:
-            return "どこにも送りません"
+            return
+                "このトグルだけならどこにも送りません(「iPhone の画面を撮る」が ON のときは開いているアプリ名も Google Gemini に送られ、「Discord に晒す」も ON なら読み取ったアプリ名が文面に載ります)"
         case .iphoneScreenshot:
             return "Google Gemini、Discord(「Discord に晒す」が ON のとき)"
         case .discordExposure:
@@ -84,7 +87,7 @@ public enum SafetyFeature: String, CaseIterable, Codable, Sendable, Hashable {
         case .discordExposure: return "なし"
         case .sermonTakeover: return "オートメーション(ミュージック)"
         case .quitLock: return "なし"
-        case .photobomb: return "なし"
+        case .photobomb: return "デスクトップフォルダへのアクセス"
         }
     }
 
