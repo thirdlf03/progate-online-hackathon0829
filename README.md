@@ -1,7 +1,7 @@
-# progate-online-hackathon0829
+# Mihari
 
 **Mihari** — サボりを検知して声で絡み、証拠を Discord に晒す macOS 常駐アプリ。
-全体像と設計の決定事項は [Issue #2 (Epic)](https://github.com/thirdlf03/progate-online-hackathon0829/issues/2) にまとめてある。
+全体像と設計の決定事項は [Issue #2 (Epic)](https://github.com/thirdlf03/Mihari/issues/2) にまとめてある。
 
 ## セーフティーモード
 
@@ -64,7 +64,7 @@ GitHub Releases の配布 zip から入れる手順。**受け取る側の Mac �
 **対象は Apple Silicon(arm64)の macOS 14 以降。**同梱している bridge のバイナリが arm64 のみのため、
 Intel Mac では動かない。Intel Mac の場合と、開発する場合は下の「使い方」からソースでビルドすること。
 
-1. [Releases](https://github.com/thirdlf03/progate-online-hackathon0829/releases) から
+1. [Releases](https://github.com/thirdlf03/Mihari/releases) から
    `Mihari-<バージョン>.zip` をダウンロードする
 2. 展開して、出てきた `Mihari.app` をアプリケーションフォルダへ移す
 3. **初回はダブルクリックでは開けない。**署名が ad-hoc で公証もしていないため Gatekeeper に止められ、
