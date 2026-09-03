@@ -214,6 +214,15 @@ desktop/
 
 Developer ID による署名も公証もしていない。配布はルートの `make dist` が作る **ad-hoc 署名の zip**
 で行う（受け取る側の初回起動の手順はルート [README の「インストール」](../README.md#インストール)）。
+
+**ad-hoc 配布では、ダウンロードした zip を展開して開くと Gatekeeper が
+「“Mihari.app” は壊れているため開けません。ゴミ箱に入れる必要があります。」というダイアログを出す**
+（macOS 15 で実測。`spctl -a -vv Mihari.app` は rejected を返し、`.app` には `com.apple.quarantine` が付く）。
+`codesign --verify` は通り zip のチェックサムも一致するので**バンドル自体は壊れていない**が、
+署名が ad-hoc だと Gatekeeper は「開発元を確認できません」ではなくこの文言を出し、
+「右クリック →「開く」」や「このまま開く」の逃げ道も出ないことが多い。
+検疫属性を外せば開ける（手順はルート README）。Developer ID で署名して公証すればこのダイアログは出なくなる。
+
 `build.sh` は次の順で署名に使う identity を決め、どれを使ったかを必ず 1 行出力する。
 
 1. 環境変数 `CODESIGN_IDENTITY` が設定されていればそれを使う（`security find-identity -v -p codesigning`
